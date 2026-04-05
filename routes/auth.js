@@ -3,8 +3,16 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const { pool: db } = require("../db");
+const { pool: db, dbQuery } = require("../db");
 require("dotenv").config();
+
+const OTP_PURPOSES = {
+  REGISTRATION: "registration",
+  PASSWORD_RESET: "password_reset",
+};
+const OTP_TTL_MS = 5 * 60 * 1000;
+const PASSWORD_POLICY_MESSAGE = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character.";
+const PASSWORD_POLICY_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 // =========================
 // EMAIL TRANSPORTER
@@ -23,54 +31,193 @@ transporter.verify((err) => {
   console.log(err ? "Email config error" : "Email transporter ready");
 });
 
+function createOtp() {
+  return crypto.randomInt(100000, 999999).toString();
+}
+
+function storeOtpChallenge(req, purpose, email, otp) {
+  req.session.emailOtp = {
+    purpose,
+    email,
+    otp,
+    expiresAt: Date.now() + OTP_TTL_MS,
+    verified: false,
+  };
+}
+
+function clearOtpChallenge(req) {
+  delete req.session.emailOtp;
+}
+
+function isOtpVerified(req, purpose, email) {
+  const state = req.session.emailOtp;
+  return Boolean(
+    state
+    && state.purpose === purpose
+    && state.email === email
+    && state.verified === true
+  );
+}
+
+function verifyOtpChallenge(req, purpose, email, otp) {
+  const state = req.session.emailOtp;
+
+  if (!state || state.purpose !== purpose || state.email !== email) {
+    return { verified: false, message: "OTP not requested" };
+  }
+
+  if (Date.now() > state.expiresAt) {
+    clearOtpChallenge(req);
+    return { verified: false, message: "OTP expired" };
+  }
+
+  if (state.otp !== otp) {
+    return { verified: false, message: "Invalid OTP" };
+  }
+
+  req.session.emailOtp = {
+    purpose,
+    email,
+    verified: true,
+  };
+
+  return { verified: true };
+}
+
+function sendOtpEmail(email, otp, subject = "Your OTP") {
+  return transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject,
+    text: `Your OTP is ${otp}. Valid for 5 minutes.`,
+  });
+}
+
+async function sendOtpResponse(req, res, { email, purpose, subject }) {
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email required" });
+  }
+
+  const otp = createOtp();
+  storeOtpChallenge(req, purpose, email, otp);
+
+  try {
+    await sendOtpEmail(email, otp, subject);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("OTP mail error:", err);
+    res.status(500).json({ success: false, message: "Mail error" });
+  }
+}
+
+async function findUserByEmail(email) {
+  const rows = await dbQuery("SELECT id, email FROM users WHERE email = ? LIMIT 1", [email]);
+  return rows[0] || null;
+}
+
+function getPasswordValidationMessage(password) {
+  if (!PASSWORD_POLICY_REGEX.test(password || "")) {
+    return PASSWORD_POLICY_MESSAGE;
+  }
+
+  return "";
+}
+
 // =========================
 // OTP SYSTEM
 // =========================
-router.post("/send-otp", (req, res) => {
+router.post("/send-otp", async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).send({ success: false, message: "Email required" });
-
-  const otp = crypto.randomInt(100000, 999999).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000; // 1day
-
-  req.session.otp = otp;
-  req.session.otpEmail = email;
-  req.session.otpExpires = expiresAt;
-
-  transporter.sendMail(
-    {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Your OTP",
-      text: `Your OTP is ${otp}. Valid for 5 minutes.`
-    },
-    (err) => {
-      if (err) return res.status(500).send({ success: false, message: "Mail error" });
-      console.log("OTP sent");
-      res.send({ success: true });
-    }
-  );
+  await sendOtpResponse(req, res, {
+    email,
+    purpose: OTP_PURPOSES.REGISTRATION,
+    subject: "Your OTP",
+  });
 });
 
 router.post("/verify-otp", (req, res) => {
   const { email, otp } = req.body;
+  const result = verifyOtpChallenge(req, OTP_PURPOSES.REGISTRATION, email, otp);
 
-  if (!req.session.otp || req.session.otpEmail !== email)
-    return res.status(400).send({ verified: false, message: "OTP not requested" });
-
-  if (Date.now() > req.session.otpExpires)
-    return res.status(400).send({ verified: false, message: "OTP expired" });
-
-  if (req.session.otp !== otp)
-    return res.status(400).send({ verified: false, message: "Invalid OTP" });
+  if (!result.verified) {
+    return res.status(400).send(result);
+  }
 
   req.session.otpVerified = true;
   req.session.verifiedEmail = email;
 
-  delete req.session.otp;
-  delete req.session.otpExpires;
-
   res.send({ verified: true });
+});
+
+router.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email required" });
+  }
+
+  try {
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "No account found for this email" });
+    }
+
+    await sendOtpResponse(req, res, {
+      email,
+      purpose: OTP_PURPOSES.PASSWORD_RESET,
+      subject: "Password Reset OTP",
+    });
+  } catch (err) {
+    console.error("Forgot password OTP error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.post("/verify-reset-otp", (req, res) => {
+  const { email, otp } = req.body;
+  const result = verifyOtpChallenge(req, OTP_PURPOSES.PASSWORD_RESET, email, otp);
+
+  if (!result.verified) {
+    return res.status(400).json(result);
+  }
+
+  res.json({ verified: true });
+});
+
+router.post("/reset-password", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: "Email and password are required" });
+  }
+
+  if (!isOtpVerified(req, OTP_PURPOSES.PASSWORD_RESET, email)) {
+    return res.status(400).json({ success: false, message: "Verify OTP first" });
+  }
+
+  const passwordError = getPasswordValidationMessage(password);
+  if (passwordError) {
+    return res.status(400).json({ success: false, message: passwordError });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = await dbQuery("UPDATE users SET password = ? WHERE email = ?", [hash, email]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    clearOtpChallenge(req);
+    req.session.otpVerified = false;
+    delete req.session.verifiedEmail;
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
 // =========================
@@ -87,6 +234,11 @@ router.post("/register", (req, res) => {
     return res.send('Passwords do not match <a href="register.html">Try again</a>');
   }
 
+  const passwordError = getPasswordValidationMessage(password);
+  if (passwordError) {
+    return res.send(`${passwordError} <a href="register.html">Try again</a>`);
+  }
+
   bcrypt.hash(password, 10, (err, hash) => {
     if (err) return res.status(500).send("Error hashing password");
 
@@ -98,6 +250,7 @@ router.post("/register", (req, res) => {
 
         req.session.otpVerified = false;
         delete req.session.verifiedEmail;
+        clearOtpChallenge(req);
 
         res.send('Registration complete <a href="/">Login</a>');
       }
