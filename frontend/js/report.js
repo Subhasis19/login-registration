@@ -1,349 +1,356 @@
 /* ===== Report UI: view + pdf generation ===== */
 (function () {
-  // helper template: render report HTML 
+  const FILTER_IDS = ["reportMonth", "reportYear", "reportOffice", "reportGroup"];
+  const PDF_BUTTON_DISABLED_STYLES = {
+    opacity: "0.6",
+    cursor: "not-allowed",
+  };
+  const PDF_BUTTON_ENABLED_STYLES = {
+    opacity: "1",
+    cursor: "pointer",
+  };
 
   let cachedReportHtml = "";
 
-  function resetPdfCache() {
-  cachedReportHtml = "";
-  const pdfBtn = document.getElementById("downloadPdfBtn");
-  if (pdfBtn) {
-    pdfBtn.disabled = true;
-    pdfBtn.style.opacity = "0.6";
-    pdfBtn.style.cursor = "not-allowed";
+  function getElement(id) {
+    return document.getElementById(id);
   }
-}
 
+  function safeNumber(value) {
+    return value == null ? 0 : Number(value) || 0;
+  }
 
-function renderReportHtml(payload, filters) {
-  const { month, year, office } = filters;
-  const s = payload || {};
+  function setPdfButtonState(enabled) {
+    const pdfButton = getElement("downloadPdfBtn");
+    if (!pdfButton) {
+      return;
+    }
 
-  /* -----------------------------
-     Helpers
-  ----------------------------- */
-  const safe = (val) => (val == null ? 0 : val);
+    pdfButton.disabled = !enabled;
+    Object.assign(
+      pdfButton.style,
+      enabled ? PDF_BUTTON_ENABLED_STYLES : PDF_BUTTON_DISABLED_STYLES
+    );
+  }
 
-  const inward = (region) => ({
-    rEng: safe(s.inwardByRegion?.[region]?.receivedEnglish),
-    rHin: safe(s.inwardByRegion?.[region]?.repliedHindi),
-    rEngRep: safe(s.inwardByRegion?.[region]?.repliedEnglish),
-    notExp: safe(s.inwardByRegion?.[region]?.notExpected),
-  });
+  function resetPdfCache() {
+    cachedReportHtml = "";
+    setPdfButtonState(false);
+  }
 
-  const section3 = (region) => {
-  const r = s.section3ByRegion?.[region] || {};
-  return {
-    h: safe(r.hindi),
-    e: safe(r.english),
-    total: safe(r.total),
-    percent: safe(r.percent)
-  };
-};
+  function getReportFilters() {
+    return {
+      month: Number(getElement("reportMonth")?.value),
+      year: Number(getElement("reportYear")?.value),
+      office: getElement("reportOffice")?.value || "",
+      group: getElement("reportGroup")?.value || "",
+    };
+  }
 
+  function getInwardRegionData(payload, region) {
+    const regionData = payload?.inwardByRegion?.[region] || {};
 
-  const emailReceived = (region, type) =>
-    safe(s.emailReceived?.[region]?.[type]);
+    return {
+      receivedEnglish: safeNumber(regionData.receivedEnglish),
+      repliedHindi: safeNumber(regionData.repliedHindi),
+      repliedEnglish: safeNumber(regionData.repliedEnglish),
+      notExpected: safeNumber(regionData.notExpected),
+    };
+  }
 
-  const emailReplied = (region) =>
-    safe(s.emailReplied?.[region]);
+  function getSection3RegionData(payload, region) {
+    const regionData = payload?.section3ByRegion?.[region] || {};
 
-  const inwardA = inward("A");
-  const inwardB = inward("B");
-  const inwardC = inward("C");
+    return {
+      hindi: safeNumber(regionData.hindi),
+      english: safeNumber(regionData.english),
+      total: safeNumber(regionData.total),
+      percent: safeNumber(regionData.percent),
+    };
+  }
 
-  const sec3A = section3("A");
-  const sec3B = section3("B");
-  const sec3C = section3("C");
+  function getEmailReceivedValue(payload, region, type) {
+    return safeNumber(payload?.emailReceived?.[region]?.[type]);
+  }
 
+  function getEmailRepliedValue(payload, region) {
+    return safeNumber(payload?.emailReplied?.[region]);
+  }
 
-  const notHin = safe(s.notingsHindi);
-  const notEng = safe(s.notingsEnglish);
+  function renderReportHtml(payload, filters) {
+    const inwardA = getInwardRegionData(payload, "A");
+    const inwardB = getInwardRegionData(payload, "B");
+    const inwardC = getInwardRegionData(payload, "C");
 
-  /* -----------------------------
-      Template 
-  ----------------------------- */
-  return `
+    const section3A = getSection3RegionData(payload, "A");
+    const section3B = getSection3RegionData(payload, "B");
+    const section3C = getSection3RegionData(payload, "C");
+
+    const notingsHindi = safeNumber(payload?.notingsHindi);
+    const notingsEnglish = safeNumber(payload?.notingsEnglish);
+
+    return `
 <div id="reportHtml" style="font-family: Arial; font-size:14px; color:#000;">
 
   <h3 style="margin-bottom:4px;">Monthly data for Quarterly Report for Hindi Rajbhasha</h3>
-  <div><strong>Month / Year : </strong>${month} / ${year}</div>
+  <div><strong>Month / Year : </strong>${filters.month} / ${filters.year}</div>
   <div>
     Office:
-      <strong>${office || "All Offices"}</strong>
+      <strong>${filters.office || "All Offices"}</strong>
   </div>
 
 
-  <!-- Section 1 -->
   <h4 style="margin-top:20px;">1. Letters received in Hindi (Official Language Rule - 5)</h4>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Total letters received in Hindi</td><td>${safe(s.lettersReceivedHindi)}</td></tr>
-    <tr><td>No. of letters not to be replied to</td><td>${safe(s.notExpectedTotal)}</td></tr>
-    <tr><td>Replied in Hindi</td><td>${safe(s.repliesSentHindi)}</td></tr>
-    <tr><td>Replied in English</td><td>${safe(s.repliesSentEnglish)}</td></tr>
+    <tr><td>Total letters received in Hindi</td><td>${safeNumber(payload?.lettersReceivedHindi)}</td></tr>
+    <tr><td>No. of letters not to be replied to</td><td>${safeNumber(payload?.notExpectedTotal)}</td></tr>
+    <tr><td>Replied in Hindi</td><td>${safeNumber(payload?.repliesSentHindi)}</td></tr>
+    <tr><td>Replied in English</td><td>${safeNumber(payload?.repliesSentEnglish)}</td></tr>
   </table>
 
-  <!-- Section 2 -->
   <h4 style="margin-top:25px;">2. Letters received in English but replied in Hindi</h4>
 
-  <!-- Region A -->
   <div style="margin-top:10px;">From Region 'A'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Letters received in English</td><td>${inwardA.rEng}</td></tr>
-    <tr><td>Replied in Hindi</td><td>${inwardA.rHin}</td></tr>
-    <tr><td>Replied in English</td><td>${inwardA.rEngRep}</td></tr>
-    <tr><td>Not expected to be replied</td><td>${inwardA.notExp}</td></tr>
+    <tr><td>Letters received in English</td><td>${inwardA.receivedEnglish}</td></tr>
+    <tr><td>Replied in Hindi</td><td>${inwardA.repliedHindi}</td></tr>
+    <tr><td>Replied in English</td><td>${inwardA.repliedEnglish}</td></tr>
+    <tr><td>Not expected to be replied</td><td>${inwardA.notExpected}</td></tr>
   </table>
 
-  <!-- Region B -->
   <div style="margin-top:10px;">From Region 'B'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Letters received in English</td><td>${inwardB.rEng}</td></tr>
-    <tr><td>Replied in Hindi</td><td>${inwardB.rHin}</td></tr>
-    <tr><td>Replied in English</td><td>${inwardB.rEngRep}</td></tr>
-    <tr><td>Not expected to be replied</td><td>${inwardB.notExp}</td></tr>
+    <tr><td>Letters received in English</td><td>${inwardB.receivedEnglish}</td></tr>
+    <tr><td>Replied in Hindi</td><td>${inwardB.repliedHindi}</td></tr>
+    <tr><td>Replied in English</td><td>${inwardB.repliedEnglish}</td></tr>
+    <tr><td>Not expected to be replied</td><td>${inwardB.notExpected}</td></tr>
   </table>
 
-  <!-- Region C -->
   <div style="margin-top:10px;">From Region 'C'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Letters received in English</td><td>${inwardC.rEng}</td></tr>
-    <tr><td>Replied in Hindi</td><td>${inwardC.rHin}</td></tr>
-    <tr><td>Replied in English</td><td>${inwardC.rEngRep}</td></tr>
-    <tr><td>Not expected to be replied</td><td>${inwardC.notExp}</td></tr>
+    <tr><td>Letters received in English</td><td>${inwardC.receivedEnglish}</td></tr>
+    <tr><td>Replied in Hindi</td><td>${inwardC.repliedHindi}</td></tr>
+    <tr><td>Replied in English</td><td>${inwardC.repliedEnglish}</td></tr>
+    <tr><td>Not expected to be replied</td><td>${inwardC.notExpected}</td></tr>
   </table>
 
 
-  <!-- Section 3 -->
   <h4 style="margin-top:25px;">3. Details of original letters issued</h4>
 
-  <!-- Region A -->
   <div>To Region 'A'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Issued in Hindi/Bilingual</td><td>${sec3A.h}</td></tr>
-    <tr><td>Issued in English</td><td>${sec3A.e}</td></tr>
-    <tr><td>Total issued</td><td>${sec3A.total}</td></tr>
-    <tr><td>Percentage Hindi/Bilingual</td><td>${sec3A.percent}%</td></tr>
+    <tr><td>Issued in Hindi/Bilingual</td><td>${section3A.hindi}</td></tr>
+    <tr><td>Issued in English</td><td>${section3A.english}</td></tr>
+    <tr><td>Total issued</td><td>${section3A.total}</td></tr>
+    <tr><td>Percentage Hindi/Bilingual</td><td>${section3A.percent}%</td></tr>
   </table>
 
-  <!-- Region B -->
   <div style="margin-top:10px;">To Region 'B'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Issued in Hindi/Bilingual</td><td>${sec3B.h}</td></tr>
-    <tr><td>Issued in English</td><td>${sec3B.e}</td></tr>
-    <tr><td>Total issued</td><td>${sec3B.total}</td></tr>
-    <tr><td>Percentage Hindi/Bilingual</td><td>${sec3B.percent}%</td></tr>
+    <tr><td>Issued in Hindi/Bilingual</td><td>${section3B.hindi}</td></tr>
+    <tr><td>Issued in English</td><td>${section3B.english}</td></tr>
+    <tr><td>Total issued</td><td>${section3B.total}</td></tr>
+    <tr><td>Percentage Hindi/Bilingual</td><td>${section3B.percent}%</td></tr>
   </table>
 
-  <!-- Region C -->
   <div style="margin-top:10px;">To Region 'C'</div>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Issued in Hindi/Bilingual</td><td>${sec3C.h}</td></tr>
-    <tr><td>Issued in English</td><td>${sec3C.e}</td></tr>
-    <tr><td>Total issued</td><td>${sec3C.total}</td></tr>
-    <tr><td>Percentage Hindi/Bilingual</td><td>${sec3C.percent}%</td></tr>
+    <tr><td>Issued in Hindi/Bilingual</td><td>${section3C.hindi}</td></tr>
+    <tr><td>Issued in English</td><td>${section3C.english}</td></tr>
+    <tr><td>Total issued</td><td>${section3C.total}</td></tr>
+    <tr><td>Percentage Hindi/Bilingual</td><td>${section3C.percent}%</td></tr>
   </table>
 
-  <!-- Section 4 -->
   <h4 style="margin-top:25px;">4. Notings on files/documents (during quarter)</h4>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><td>Notings in Hindi (pages)</td><td>${notHin}</td></tr>
-    <tr><td>Notings in English (pages)</td><td>${notEng}</td></tr>
-    <tr><td>Total Notings</td><td>${notHin + notEng}</td></tr>
-    <tr><td>Comments sent through e-office</td><td>${safe(s.notingsEoffice)}</td></tr>
+    <tr><td>Notings in Hindi (pages)</td><td>${notingsHindi}</td></tr>
+    <tr><td>Notings in English (pages)</td><td>${notingsEnglish}</td></tr>
+    <tr><td>Total Notings</td><td>${notingsHindi + notingsEnglish}</td></tr>
+    <tr><td>Comments sent through e-office</td><td>${safeNumber(payload?.notingsEoffice)}</td></tr>
   </table>
 
-  <!-- Section 5 -->
   <h4 style="margin-top:25px;">5. Emails received</h4>
   <table style="width:60%; border-collapse:collapse;">
     <tr><th>Region</th><th>English</th><th>Hindi</th></tr>
-    <tr><td>A</td><td>${emailReceived("A","eng")}</td><td>${emailReceived("A","hin")}</td></tr>
-    <tr><td>B</td><td>${emailReceived("B","eng")}</td><td>${emailReceived("B","hin")}</td></tr>
-    <tr><td>C</td><td>${emailReceived("C","eng")}</td><td>${emailReceived("C","hin")}</td></tr>
-    
+    <tr><td>A</td><td>${getEmailReceivedValue(payload, "A", "eng")}</td><td>${getEmailReceivedValue(payload, "A", "hin")}</td></tr>
+    <tr><td>B</td><td>${getEmailReceivedValue(payload, "B", "eng")}</td><td>${getEmailReceivedValue(payload, "B", "hin")}</td></tr>
+    <tr><td>C</td><td>${getEmailReceivedValue(payload, "C", "eng")}</td><td>${getEmailReceivedValue(payload, "C", "hin")}</td></tr>
   </table>
 
-  <!-- Section 6 -->
   <h4 style="margin-top:25px;">6. Emails replied in Hindi</h4>
   <table style="width:40%; border-collapse:collapse;">
     <tr><th>Region</th><th>Nos</th></tr>
-    <tr><td>A</td><td>${emailReplied("A")}</td></tr>
-    <tr><td>B</td><td>${emailReplied("B")}</td></tr>
-    <tr><td>C</td><td>${emailReplied("C")}</td></tr>
+    <tr><td>A</td><td>${getEmailRepliedValue(payload, "A")}</td></tr>
+    <tr><td>B</td><td>${getEmailRepliedValue(payload, "B")}</td></tr>
+    <tr><td>C</td><td>${getEmailRepliedValue(payload, "C")}</td></tr>
   </table>
 
-  <!-- Footer -->
   <div style="margin-top:40px;">
-
     <div>
       Group Name:
       <strong>${filters.group || "All Groups"}</strong>
     </div>
 
-    <div style="margin-top:10px;">Group Head Name: <strong>${s.groupHeadName || ""}</strong></div>
+    <div style="margin-top:10px;">Group Head Name: <strong>${payload?.groupHeadName || ""}</strong></div>
     <div style="margin-top:10px;">Signature: __________________________</div>
   </div>
 
 </div>
 `;
-}
-
+  }
 
   async function fetchReportData(filters) {
-    const body = JSON.stringify(filters);
-    const res = await fetch("/admin/report/data", {
+    const response = await fetch("/admin/report/data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body
+      body: JSON.stringify(filters),
     });
-    if (!res.ok) {
-      const j = await res.json().catch(()=>null);
-      throw new Error((j && j.message) || "Failed to fetch report data");
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => null);
+      throw new Error(
+        (errorPayload && errorPayload.message) || "Failed to fetch report data"
+      );
     }
-    return await res.json();
+
+    return response.json();
   }
 
-  function injectReportStylesheet() {
-  if (!document.getElementById("report-css")) {
+  function ensureReportStylesheet() {
+    if (getElement("report-css")) {
+      return;
+    }
+
     const link = document.createElement("link");
     link.id = "report-css";
     link.rel = "stylesheet";
-    link.href = "/css/report.css";   
+    link.href = "/css/report.css";
     document.head.appendChild(link);
   }
-}
 
-
-  // render preview into container
   async function viewReport() {
-    const month = Number(document.getElementById("reportMonth").value);
-    const year = Number(document.getElementById("reportYear").value);
-    const office = document.getElementById("reportOffice").value || "";
-    const group = document.getElementById("reportGroup").value || "";
+    const filters = getReportFilters();
+    if (!filters.month || !filters.year) {
+      alert("Select month and year");
+      return;
+    }
 
-    if (!month || !year) return alert("Select month and year");
+    const previewContainer = getElement("reportPreviewContainer");
+    if (!previewContainer) {
+      return;
+    }
 
-    const filters = { month, year, office, group };
-    const container = document.getElementById("reportPreviewContainer");
-    container.innerHTML = `<div style="padding:30px;text-align:center;color:#777">Loading report…</div>`;
+    previewContainer.innerHTML =
+      '<div style="padding:30px;text-align:center;color:#777">Loading report...</div>';
 
     try {
-      const data = await fetchReportData(filters);
-      injectReportStylesheet();
+      const reportData = await fetchReportData(filters);
+      ensureReportStylesheet();
 
-      const html = renderReportHtml(data, filters);
-      container.innerHTML = html;
-
-// Cache HTML for PDF
-cachedReportHtml = html;
-
-// Enable PDF button now
-const pdfBtn = document.getElementById("downloadPdfBtn");
-if (pdfBtn) {
-  pdfBtn.disabled = false;
-  pdfBtn.style.opacity = "1";
-  pdfBtn.style.cursor = "pointer";
-}
-
-
-    } catch (err) {
-      console.error("viewReport:", err);
-      container.innerHTML = `<div style="padding:30px;text-align:center;color:#c00">${err.message}</div>`;
+      const reportHtml = renderReportHtml(reportData, filters);
+      previewContainer.innerHTML = reportHtml;
+      cachedReportHtml = reportHtml;
+      setPdfButtonState(true);
+    } catch (error) {
+      console.error("viewReport:", error);
+      previewContainer.innerHTML = `<div style="padding:30px;text-align:center;color:#c00">${error.message}</div>`;
+      resetPdfCache();
     }
   }
 
   async function generatePdf() {
-  const month = Number(document.getElementById("reportMonth").value);
-  const year = Number(document.getElementById("reportYear").value);
+    const { month, year } = getReportFilters();
 
-  if (!month || !year) {
-    alert("Select month and year");
-    return;
-  }
-
-  
-  if (!cachedReportHtml) {
-    alert("Please click View Report before generating PDF");
-    return;
-  }
-
-  // Month name for filename
-  const monthName = new Date(year, month - 1).toLocaleString("en-US", {
-    month: "short"
-  });
-
-  const filename = `Rajbhasha_Report_${monthName}_${year}.pdf`;
-
-  try {
-    const res = await fetch("/admin/report/pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        html: cachedReportHtml,
-        filename
-      })
-    });
-
-    if (!res.ok) {
-      const j = await res.json().catch(() => null);
-      throw new Error((j && j.message) || "PDF generation failed");
+    if (!month || !year) {
+      alert("Select month and year");
+      return;
     }
 
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    if (!cachedReportHtml) {
+      alert("Please click View Report before generating PDF");
+      return;
+    }
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const monthName = new Date(year, month - 1).toLocaleString("en-US", {
+      month: "short",
+    });
+    const filename = `Rajbhasha_Report_${monthName}_${year}.pdf`;
 
-    URL.revokeObjectURL(url);
+    try {
+      const response = await fetch("/admin/report/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          html: cachedReportHtml,
+          filename,
+        }),
+      });
 
-  } catch (err) {
-    console.error("generatePdf:", err);
-    alert(err.message || "Failed to generate PDF");
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        throw new Error(
+          (errorPayload && errorPayload.message) || "PDF generation failed"
+        );
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("generatePdf:", error);
+      alert(error.message || "Failed to generate PDF");
+    }
   }
-}
 
+  function populateReportYearOptions() {
+    const yearSelect = getElement("reportYear");
+    if (!yearSelect) {
+      return;
+    }
 
-  document.addEventListener("DOMContentLoaded", () => {
-  const viewBtn = document.getElementById("viewReportBtn");
-  const pdfBtn = document.getElementById("downloadPdfBtn");
+    const currentYear = new Date().getFullYear();
 
-  // Disable PDF button initially
-  if (pdfBtn) {
-    pdfBtn.disabled = true;
-    pdfBtn.style.opacity = "0.6";
-    pdfBtn.style.cursor = "not-allowed";
+    for (let year = currentYear + 2; year >= currentYear - 5; year -= 1) {
+      const option = document.createElement("option");
+      option.value = year;
+      option.textContent = year;
+      yearSelect.appendChild(option);
+    }
   }
 
-  if (viewBtn) viewBtn.addEventListener("click", viewReport);
-  if (pdfBtn) pdfBtn.addEventListener("click", generatePdf);
-  ["reportMonth","reportYear","reportOffice","reportGroup"].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener("change", resetPdfCache);
-});
+  function bindFilterChangeReset() {
+    FILTER_IDS.forEach((id) => {
+      const element = getElement(id);
+      if (element) {
+        element.addEventListener("change", resetPdfCache);
+      }
+    });
+  }
 
-});
+  function initReportPage() {
+    const viewButton = getElement("viewReportBtn");
+    const pdfButton = getElement("downloadPdfBtn");
 
+    setPdfButtonState(false);
+    populateReportYearOptions();
+    bindFilterChangeReset();
+
+    if (viewButton) {
+      viewButton.addEventListener("click", viewReport);
+    }
+
+    if (pdfButton) {
+      pdfButton.addEventListener("click", generatePdf);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", initReportPage);
 })();
-
-
-document.addEventListener("DOMContentLoaded", () => {
-  const yearSelect = document.getElementById("reportYear");
-  if (!yearSelect) return;
-
-  const currentYear = new Date().getFullYear();
-
-  // Generate range: current year → 5 years back and 2 year future 
-  for (let y = currentYear + 2; y >= currentYear - 5; y--) {
-    const opt = document.createElement("option");
-    opt.value = y;
-    opt.textContent = y;
-    yearSelect.appendChild(opt);
-  }
-});
