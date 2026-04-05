@@ -161,7 +161,7 @@
     <tr><td>Percentage Hindi/Bilingual</td><td>${section3C.percent}%</td></tr>
   </table>
 
-  <h4 style="margin-top:25px;">4. Notings on files/documents (during quarter)</h4>
+  <h4 style="margin-top:25px;">4. Notings on files/documents</h4>
   <table style="width:100%; border-collapse:collapse;">
     <tr><td>Notings in Hindi (pages)</td><td>${notingsHindi}</td></tr>
     <tr><td>Notings in English (pages)</td><td>${notingsEnglish}</td></tr>

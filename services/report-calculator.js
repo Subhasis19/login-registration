@@ -195,18 +195,6 @@ async function fetchLetterMetrics(scope) {
       scope.inwardParams
     ),
     dbQuery(
-      `
-        SELECT
-          COALESCE(sender_region, '${UNKNOWN_REGION}') AS region,
-          SUM(language_of_document IN ('Hindi','Bilingual')) AS hindiPlusBilingual,
-          SUM(language_of_document = 'English') AS english
-        FROM inward_records
-        WHERE ${scope.inwardWhereSql}
-        GROUP BY region
-      `,
-      scope.inwardParams
-    ),
-    dbQuery(
       `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql}`,
       scope.inwardParams
     ),
@@ -216,18 +204,31 @@ async function fetchLetterMetrics(scope) {
     ),
   ];
 
-  const [
-    rowsInwardRegion,
-    rowsSection3,
-    totalInward,
-    totalOutward,
-  ] = await Promise.all(queries);
+  const [rowsInwardRegion, totalInward, totalOutward] = await Promise.all(queries);
 
   return {
     inwardByRegion: buildInwardByRegion(rowsInwardRegion),
-    section3ByRegion: buildSection3ByRegion(rowsSection3),
     totalInwards: normalizeNumber(totalInward[0]?.cnt),
     totalOutwards: normalizeNumber(totalOutward[0]?.cnt),
+  };
+}
+
+async function fetchSection3Metrics(scope) {
+  const rowsSection3 = await dbQuery(
+    `
+      SELECT
+        COALESCE(sender_region, '${UNKNOWN_REGION}') AS region,
+        SUM(language_of_document IN ('Hindi','Bilingual')) AS hindiPlusBilingual,
+        SUM(language_of_document = 'English') AS english
+      FROM inward_records
+      WHERE ${scope.inwardWhereSql}
+      GROUP BY region
+    `,
+    scope.inwardParams
+  );
+
+  return {
+    section3ByRegion: buildSection3ByRegion(rowsSection3),
   };
 }
 
@@ -313,9 +314,10 @@ async function fetchReportSignatory(group) {
 async function calculateReportData(month, year, office = "", group = "") {
   const scope = buildScope(month, year, office, group);
 
-  const [section1Metrics, letterMetrics, emailMetrics, notingsMetrics, signatory] = await Promise.all([
+  const [section1Metrics, letterMetrics, section3Metrics, emailMetrics, notingsMetrics, signatory] = await Promise.all([
     fetchSection1Metrics(scope),
     fetchLetterMetrics(scope),
+    fetchSection3Metrics(scope),
     fetchEmailMetrics(scope),
     fetchNotingsMetrics(scope),
     fetchReportSignatory(group),
@@ -324,6 +326,7 @@ async function calculateReportData(month, year, office = "", group = "") {
   return {
     ...section1Metrics,
     ...letterMetrics,
+    ...section3Metrics,
     ...emailMetrics,
     ...notingsMetrics,
     ...signatory,
@@ -333,5 +336,6 @@ async function calculateReportData(month, year, office = "", group = "") {
 module.exports = {
   calculateReportData,
 };
+
 
 
