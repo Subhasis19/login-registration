@@ -6,23 +6,9 @@ const fs = require("fs");
 const path = require("path");
 const { pool: db, dbQuery } = require("../db");
 const { requireAdmin } = require("../middlewares/authMiddleware");
-
-// =============================================
-// HELPER FUNCTIONS
-// =============================================
-function getMonthDateRange(year, month) {
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 1);
-    return {
-        start: start.toISOString().slice(0, 10),
-        end: end.toISOString().slice(0, 10)
-    };
-}
+const { getMonthDateRange } = require("../utils/date-range");
 
 
-// =============================================
-// MASSIVE REPORT CALCULATION FUNCTION
-// =============================================
 async function calculateReportData(month, year, office = "", group = "") {
     const { start, end } = getMonthDateRange(year, month);
     const inOfficeCond = office ? "AND received_in = ?" : "";

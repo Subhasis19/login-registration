@@ -3,29 +3,12 @@ const router = express.Router();
 const path = require("path");
 const { dbQuery } = require("../db");
 const { requireLogin } = require("../middlewares/authMiddleware");
+const { getMonthDateRange } = require("../utils/date-range");
 
-
-// Helper: Get Month Date Range
-function getMonthDateRange(year, month) {
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 1);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10)
-  };
-}
-
-// =============================================
-// DASHBOARD VIEW
-// =============================================
 router.get("/dashboard.html", requireLogin, (req, res) => {
-  // Pass to static middleware or send file directly
   res.sendFile(path.join(__dirname, "../frontend/dashboard.html"));
 });
 
-// =============================================
-// DASHBOARD (GLOBAL + MONTHLY SUMMARY)
-// =============================================
 router.get("/dashboard/summary", requireLogin, async (req, res) => {
   try {
     const { month, year } = req.query;

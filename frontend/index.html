@@ -13,7 +13,6 @@
     <form action="/login" method="POST">
         <input type="email" name="email" placeholder="Email" required><br>
 
-        <!-- Password field with toggle icon -->
         <div class="password-container">
             <input type="password" name="password" id="loginPassword" placeholder="Password" required>
             <i class="fa-solid fa-eye toggle-password" onclick="togglePassword('loginPassword', this)"></i>
@@ -26,21 +25,7 @@
 
     <p>Don't have an account? <a href="register.html">Register</a></p>
 
-    <script>
-        // Reusable password toggle function (same as registration)
-        function togglePassword(id, icon) {
-            const input = document.getElementById(id);
-            if (input.type === "password") {
-                input.type = "text";
-                icon.classList.remove("fa-eye");
-                icon.classList.add("fa-eye-slash");
-            } else {
-                input.type = "password";
-                icon.classList.remove("fa-eye-slash");
-                icon.classList.add("fa-eye");
-            }
-        }
-    </script>
+    <script src="js/password-toggle.js"></script>
 </body>
 
 </html>
