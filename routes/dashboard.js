@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const path = require("path");
-const { pool: db, dbQuery } = require("../db");
+const { dbQuery } = require("../db");
 const { requireLogin } = require("../middlewares/authMiddleware");
 
 
@@ -39,39 +39,94 @@ router.get("/dashboard/summary", requireLogin, async (req, res) => {
       end = range.end;
     }
 
-    // -------- INWARD QUERY --------
-    let inwardSql = `
-      SELECT 
-        i.*,
-        o.s_no AS has_outward
-      FROM inward_records i
-      LEFT JOIN outward_records o
-        ON i.s_no = o.inward_s_no
-    `;
-    let inwardParams = [];
+    let inwardRows = [];
+    let outwardRows = [];
+    let totalInwards = 0;
+    let totalOutwards = 0;
+    let repliesPending = 0;
 
     if (start && end) {
-      inwardSql += ` WHERE date_of_receipt >= ? AND date_of_receipt < ? `;
-      inwardParams.push(start, end);
+  
+      let inwardSql = `
+        SELECT
+          i.*,
+          o.s_no AS has_outward
+        FROM inward_records i
+        LEFT JOIN outward_records o
+          ON i.s_no = o.inward_s_no
+        WHERE i.date_of_receipt >= ? AND i.date_of_receipt < ?
+        ORDER BY i.s_no DESC
+      `;
+      let outwardSql = `
+        SELECT *
+        FROM outward_records
+        WHERE date_of_despatch >= ? AND date_of_despatch < ?
+        ORDER BY s_no DESC
+      `;
+
+      [inwardRows, outwardRows] = await Promise.all([
+        dbQuery(inwardSql, [start, end]),
+        dbQuery(outwardSql, [start, end]),
+      ]);
+
+      totalInwards = inwardRows.length;
+      totalOutwards = outwardRows.length;
+      repliesPending = inwardRows.filter(r => r.reply_required === "Yes" && !r.has_outward).length;
+    } else {
+      // Default dashboard view only needs the latest 5 rows for each table.
+      const [
+        inwardRowsResult,
+        outwardRowsResult,
+        totalInwardsResult,
+        totalOutwardsResult,
+        repliesPendingResult,
+      ] = await Promise.all([
+        dbQuery(
+          `
+            SELECT
+              i.*,
+              o.s_no AS has_outward
+            FROM inward_records i
+            LEFT JOIN outward_records o
+              ON i.s_no = o.inward_s_no
+            ORDER BY i.s_no DESC
+            LIMIT 5
+          `
+        ),
+        dbQuery(
+          `
+            SELECT *
+            FROM outward_records
+            ORDER BY s_no DESC
+            LIMIT 5
+          `
+        ),
+        dbQuery(
+          `
+            SELECT COUNT(*) AS total
+            FROM inward_records i
+            LEFT JOIN outward_records o
+              ON i.s_no = o.inward_s_no
+          `
+        ),
+        dbQuery(`SELECT COUNT(*) AS total FROM outward_records`),
+        dbQuery(
+          `
+            SELECT COUNT(*) AS total
+            FROM inward_records i
+            LEFT JOIN outward_records o
+              ON i.s_no = o.inward_s_no
+            WHERE i.reply_required = 'Yes' AND o.s_no IS NULL
+          `
+        ),
+      ]);
+
+      inwardRows = inwardRowsResult;
+      outwardRows = outwardRowsResult;
+      totalInwards = Number(totalInwardsResult[0]?.total) || 0;
+      totalOutwards = Number(totalOutwardsResult[0]?.total) || 0;
+      repliesPending = Number(repliesPendingResult[0]?.total) || 0;
     }
-    inwardSql += ` ORDER BY s_no DESC`;
-    const inwardRows = await dbQuery(inwardSql, inwardParams);
-
-    // -------- OUTWARD QUERY --------
-    let outwardSql = `SELECT * FROM outward_records`;
-    let outwardParams = [];
-
-    if (start && end) {
-      outwardSql += ` WHERE date_of_despatch >= ? AND date_of_despatch < ? `;
-      outwardParams.push(start, end);
-    }
-    outwardSql += ` ORDER BY s_no DESC`;
-    const outwardRows = await dbQuery(outwardSql, outwardParams);
-
-    // -------- COUNTS --------
-    const totalInwards = inwardRows.length;
-    const totalOutwards = outwardRows.length;
-    const repliesPending = inwardRows.filter(r => r.reply_required === "Yes" && !r.has_outward).length;
 
     res.json({
       totalInwards,
