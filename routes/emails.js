@@ -271,7 +271,10 @@ router.get("/emails/check", requireLogin, async (req, res) => {
         res.json(buildEmailCheckResponse(row));
     } catch (err) {
         console.error("Email check error:", err);
-        res.json({ exists: false });
+        res.status(500).json({
+            exists: false,
+            message: "Failed to check email status.",
+        });
     }
 });
 

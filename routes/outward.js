@@ -98,7 +98,7 @@ router.post("/outward/add", requireLogin, async (req, res) => {
       );
 
       if (existing.length > 0) {
-        return res.status(400).send("Outward reply already exists for this Inward entry");
+        return res.status(409).send("Outward reply already exists for this Inward entry.");
       }
     }
 
@@ -157,16 +157,16 @@ router.post("/outward/add", requireLogin, async (req, res) => {
       }
     }
 
-    if (!success) return res.status(500).send("Failed to generate outward number");
+    if (!success) return res.status(500).send("Failed to generate outward number.");
 
-    res.send(`
+    res.status(201).send(`
       <h3 style="text-align:center;">Outward Entry Saved</h3>
       <p style="text-align:center;">Outward No: <strong>${outward_no}</strong></p>
       <p style="text-align:center;"><a href="/outward" target="_self">Add another</a></p>
     `);
   } catch (err) {
     console.error("DB ERROR:", err.sqlMessage || err);
-    res.status(500).send(err.sqlMessage || "Server error");
+    res.status(500).send("Failed to save outward entry.");
   }
 });
 
@@ -175,7 +175,7 @@ router.post("/outward/add", requireLogin, async (req, res) => {
 // =========================
 router.get("/outward/all", requireLogin, (req, res) => {
   db.query("SELECT * FROM outward_records ORDER BY s_no DESC", (err, rows) => {
-    if (err) return res.status(500).send("Error");
+    if (err) return res.status(500).send("Failed to load outward records.");
     res.json(rows);
   });
 });
