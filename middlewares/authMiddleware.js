@@ -2,7 +2,6 @@
 
 function requireLogin(req, res, next) {
     if (!req.session.user) {
-        // if JSON request (like a fetch API call)
         if (req.xhr || req.headers.accept?.includes("application/json")) {
             return res.status(401).json({ success: false, message: "Not logged in" });
         }

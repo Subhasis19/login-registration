@@ -216,8 +216,8 @@ CREATE TABLE notings_records (
 
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-  UNIQUE KEY uq_notings (
-    group_name, month, year, entry_type
+  UNIQUE KEY uq_notings_group (
+    group_name, month, year
   )
 );
 

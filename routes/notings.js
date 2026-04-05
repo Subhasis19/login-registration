@@ -30,6 +30,10 @@ function hasRequiredFields({ month, year, entryType }) {
     return Boolean(month && year && entryType);
 }
 
+function isCommentEntry(entryType) {
+    return entryType === "Comment";
+}
+
 // =========================
 // NOTINGS: SAVE MONTHLY DATA
 // =========================
@@ -37,6 +41,7 @@ router.post("/notings/save", requireLogin, async (req, res) => {
     const groupName = req.session.user.group;
     const userRole = req.session.user.role;
     const payload = getNotingsPayload(req.body);
+    const isComment = isCommentEntry(payload.entryType);
 
     if (!hasRequiredFields(payload)) {
         return res.status(400).json({
@@ -63,7 +68,7 @@ router.post("/notings/save", requireLogin, async (req, res) => {
                 });
             }
 
-            if (userRole !== "admin") {
+            if (userRole !== "admin" && !isComment) {
                 return res.status(400).json({
                     success: false,
                     message: "Already submitted. Waiting for admin approval.",
@@ -71,30 +76,58 @@ router.post("/notings/save", requireLogin, async (req, res) => {
             }
         }
 
-        await dbQuery(
-            `
+        const sql = isComment
+            ? `
                 INSERT INTO notings_records
                 (group_name, month, year, entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                VALUES (?, ?, ?, ?, 0, 0, ?, 'pending')
+                ON DUPLICATE KEY UPDATE
+                    eoffice_comments = VALUES(eoffice_comments)
+            `
+            : `
+                INSERT INTO notings_records
+                (group_name, month, year, entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments, status)
+                VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')
                 ON DUPLICATE KEY UPDATE
                     notings_hindi_pages = VALUES(notings_hindi_pages),
-                    notings_english_pages = VALUES(notings_english_pages),
-                    eoffice_comments = VALUES(eoffice_comments)
-            `,
-            [
+                    notings_english_pages = VALUES(notings_english_pages)
+            `;
+
+        const params = isComment
+            ? [
+                groupName,
+                payload.month,
+                payload.year,
+                payload.entryType,
+                payload.eoffice,
+            ]
+            : [
                 groupName,
                 payload.month,
                 payload.year,
                 payload.entryType,
                 payload.hindi,
                 payload.english,
-                payload.eoffice,
-            ]
+            ];
+
+        await dbQuery(
+            sql,
+            params
         );
+
+        let message = "Submitted successfully";
+
+        if (existingRows.length > 0) {
+            message = isComment ? "Comment updated successfully" : "Updated successfully";
+        } else if (isComment) {
+            message = "Comment saved successfully";
+        }
 
         res.json({
             success: true,
-            message: userRole === "admin" ? "Updated successfully" : "Submitted successfully",
+            message: userRole === "admin" && existingRows.length > 0
+                ? "Updated successfully"
+                : message,
         });
     } catch (err) {
         console.error("Notings save error:", err);
@@ -111,6 +144,7 @@ router.post("/notings/save", requireLogin, async (req, res) => {
 router.get("/notings/check", requireLogin, async (req, res) => {
     const groupName = req.session.user.group;
     const payload = getNotingsPayload(req.query);
+    const isComment = isCommentEntry(payload.entryType);
 
     if (!hasRequiredFields(payload)) {
         return res.json({ exists: false });
@@ -128,6 +162,15 @@ router.get("/notings/check", requireLogin, async (req, res) => {
 
         if (rows.length === 0) {
             return res.json({ exists: false });
+        }
+
+        if (isComment && rows[0].status !== "confirmed") {
+            return res.json({
+                exists: true,
+                status: rows[0].status,
+                allowResubmit: true,
+                message: "A comment entry already exists for this month. Saving again will update its value.",
+            });
         }
 
         res.json({
@@ -334,7 +377,7 @@ router.patch("/admin/notings/:id", requireAdmin, async (req, res) => {
     try {
         const currentRows = await dbQuery(
             `
-                SELECT id, group_name, status
+                SELECT id, group_name, status, notings_hindi_pages, notings_english_pages, eoffice_comments
                 FROM notings_records
                 WHERE id = ?
             `,
@@ -349,6 +392,15 @@ router.patch("/admin/notings/:id", requireAdmin, async (req, res) => {
         }
 
         const current = currentRows[0];
+        const nextHindi = isCommentEntry(payload.entryType)
+            ? current.notings_hindi_pages
+            : payload.hindi;
+        const nextEnglish = isCommentEntry(payload.entryType)
+            ? current.notings_english_pages
+            : payload.english;
+        const nextEoffice = isCommentEntry(payload.entryType)
+            ? payload.eoffice
+            : current.eoffice_comments;
 
         if (current.status === "confirmed") {
             return res.status(400).json({
@@ -388,9 +440,9 @@ router.patch("/admin/notings/:id", requireAdmin, async (req, res) => {
                 payload.month,
                 payload.year,
                 payload.entryType,
-                payload.hindi,
-                payload.english,
-                payload.eoffice,
+                nextHindi,
+                nextEnglish,
+                nextEoffice,
                 id,
             ]
         );

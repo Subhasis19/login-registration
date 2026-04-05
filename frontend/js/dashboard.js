@@ -48,6 +48,27 @@
       : "Notings – Monthly Report";
   }
 
+  function toggleNotingsFields(entryType = document.getElementById("entryType")?.value) {
+    const hindiField = document.getElementById("notingsHindiField");
+    const englishField = document.getElementById("notingsEnglishField");
+    const eofficeField = document.getElementById("notingsEofficeField");
+
+    const isNoting = entryType === "Noting";
+    const isComment = entryType === "Comment";
+
+    if (hindiField) {
+      hindiField.style.display = isNoting ? "" : "none";
+    }
+
+    if (englishField) {
+      englishField.style.display = isNoting ? "" : "none";
+    }
+
+    if (eofficeField) {
+      eofficeField.style.display = isComment ? "" : "none";
+    }
+  }
+
   function resetNotingsForm() {
     document.getElementById("notingsMonth").value = "";
     document.getElementById("notingsYear").value = "";
@@ -73,6 +94,8 @@
     if (title) {
       title.textContent = getDefaultNotingsTitle();
     }
+
+    toggleNotingsFields("");
   }
 
   function syncDashboardUrl(page, extraParams = {}) {
@@ -483,8 +506,13 @@ if (et) {
 
 
 
-["notingsMonth", "notingsYear", "entryType"].forEach(id => {
+["notingsMonth", "notingsYear"].forEach(id => {
   document.getElementById(id)?.addEventListener("change", checkNotingsStatus);
+});
+
+document.getElementById("entryType")?.addEventListener("change", () => {
+  toggleNotingsFields();
+  checkNotingsStatus();
 });
 
 
@@ -522,13 +550,21 @@ if (et) {
   // GET NOTINGS PAYLOAD
   // ===============================
   function getNotingsPayload() {
+    const entryType = document.getElementById("entryType").value;
+
     return {
       month: document.getElementById("notingsMonth").value,
       year: document.getElementById("notingsYear").value,
-      entry_type: document.getElementById("entryType").value,
-      hindi: Number(document.getElementById("notingsHindi").value) || 0,
-      english: Number(document.getElementById("notingsEnglish").value) || 0,
-      eoffice: Number(document.getElementById("notingsEoffice").value) || 0
+      entry_type: entryType,
+      hindi: entryType === "Noting"
+        ? Number(document.getElementById("notingsHindi").value) || 0
+        : 0,
+      english: entryType === "Noting"
+        ? Number(document.getElementById("notingsEnglish").value) || 0
+        : 0,
+      eoffice: entryType === "Comment"
+        ? Number(document.getElementById("notingsEoffice").value) || 0
+        : 0
     };
   }
 
@@ -539,8 +575,15 @@ if (et) {
       const month = document.getElementById("notingsMonth").value;
       const year = document.getElementById("notingsYear").value;
       const entry_type = document.getElementById("entryType").value;
+      const isComment = entry_type === "Comment";
+      const btn = document.getElementById("saveNotingsBtn");
+      const msg = document.getElementById("notingsMsg");
 
-      if (!month || !year || !entry_type) return;
+      if (!month || !year || !entry_type) {
+        if (btn) btn.disabled = false;
+        setMessage(msg, "", "#777");
+        return;
+      }
 
       const editId = document.getElementById("saveNotingsBtn")?.dataset.editId;
       const isAdminEdit = Boolean(editId && window.currentUserRole === "admin");
@@ -554,10 +597,17 @@ if (et) {
       try {
         const data = await apiFetch(url);
 
-        const btn = document.getElementById("saveNotingsBtn");
-        const msg = document.getElementById("notingsMsg");
-
         if (data.exists) {
+          if (!isAdminEdit && isComment && data.allowResubmit && data.status !== "confirmed") {
+            btn.disabled = false;
+            setMessage(
+              msg,
+              data.message || "A comment entry already exists for this month. Saving again will update its value.",
+              "green"
+            );
+            return;
+          }
+
           btn.disabled = true;
 
           if (data.status === "confirmed") {
@@ -592,6 +642,7 @@ if (et) {
       document.getElementById("notingsMonth").value = data.month;
       document.getElementById("notingsYear").value = data.year;
       document.getElementById("entryType").value = data.entry_type;
+      toggleNotingsFields(data.entry_type);
       document.getElementById("notingsHindi").value = data.notings_hindi_pages;
       document.getElementById("notingsEnglish").value = data.notings_english_pages;
       document.getElementById("notingsEoffice").value = data.eoffice_comments;
@@ -916,7 +967,12 @@ document.getElementById("saveNotingsBtn")?.addEventListener("click", () => {
   })
     .then(data => {
       setMessage(msg, data.message || "Success", "green");
-      document.getElementById("saveNotingsBtn").disabled = true;
+      if (!isAdminEdit && payload.entry_type === "Noting") {
+        document.getElementById("saveNotingsBtn").disabled = true;
+        return;
+      }
+
+      document.getElementById("saveNotingsBtn").disabled = false;
     })
     .catch(err => {
       setMessage(msg, err.message || "Error", "red");
