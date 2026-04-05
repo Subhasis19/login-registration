@@ -1,24 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const { pool: db } = require("../db");
+const { dbQuery } = require("../db");
 const { requireLogin, requireAdmin } = require("../middlewares/authMiddleware");
 
 const ENTRY_TYPES = {
     NOTING: "Noting",
     COMMENT: "Comment",
 };
-
-function dbQuery(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.query(sql, params, (err, rows) => {
-            if (err) {
-                reject(err);
-                return;
-            }
-            resolve(rows);
-        });
-    });
-}
 
 function normalizeEntryType(value) {
     return value === ENTRY_TYPES.NOTING || value === ENTRY_TYPES.COMMENT

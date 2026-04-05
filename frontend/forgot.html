@@ -56,20 +56,9 @@
 
     <p><a href="index.html">Back to Login</a></p>
 
+    <script src="js/password-toggle.js"></script>
     <script src="js/password-policy.js"></script>
     <script>
-        function togglePassword(id, icon) {
-            const input = document.getElementById(id);
-            if (input.type === "password") {
-                input.type = "text";
-                icon.classList.remove("fa-eye");
-                icon.classList.add("fa-eye-slash");
-            } else {
-                input.type = "password";
-                icon.classList.remove("fa-eye-slash");
-                icon.classList.add("fa-eye");
-            }
-        }
 
         function show(id) { document.getElementById(id).style.display = "block"; }
         function hide(id) { document.getElementById(id).style.display = "none"; }
