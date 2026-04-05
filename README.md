@@ -239,6 +239,7 @@ CREATE TABLE email_records (
 
   total_english INT UNSIGNED NOT NULL DEFAULT 0,
   total_hindi   INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('pending','confirmed') DEFAULT 'pending',
 
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
