@@ -197,6 +197,69 @@ async function loadGroups(selectId, defaultText = "All Groups") {
   }
 }
 
+  function renderInwardTable(rows) {
+    const inwardTbody = document.getElementById("inwardsTbody");
+    if (!inwardTbody) return;
+
+    if (!rows.length) {
+      inwardTbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align:center; padding:20px; color:#999;">
+            No records found.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    inwardTbody.innerHTML = rows.map((r) => {
+      const isPending = r.reply_required === "Yes" && !r.has_outward;
+
+      return `
+        <tr
+          class="record-row ${isPending ? "pending-row" : ""}"
+          data-type="inward"
+          data-id="${r.s_no}"
+        >
+          <td>
+            <strong>${r.inward_no}</strong>
+            ${isPending ? `<span class="pending-badge">Pending</span>` : ""}
+          </td>
+          <td>${formatDate(r.date_of_receipt)}</td>
+          <td>${r.name_of_sender}</td>
+          <td>${r.received_in}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function renderOutwardTable(rows) {
+    const outwardTbody = document.getElementById("outwardsTbody");
+    if (!outwardTbody) return;
+
+    if (!rows.length) {
+      outwardTbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align:center; padding:20px; color:#999;">
+            No records found.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    outwardTbody.innerHTML = rows.map((r) => `
+      <tr
+        class="record-row"
+        data-type="outward"
+        data-id="${r.s_no}"
+      >
+        <td><strong>${r.outward_no}</strong></td>
+        <td>${formatDate(r.date_of_despatch)}</td>
+        <td>${r.name_of_receiver}</td>
+        <td>${r.reply_from}</td>
+      </tr>
+    `).join("");
+  }
+
 
   /* ---------------------------
     LOAD DASHBOARD (GLOBAL / MONTHLY)
@@ -232,77 +295,36 @@ async function loadGroups(selectId, defaultText = "All Groups") {
       document.getElementById("repliesPending").textContent = data.repliesPending;
 
       // Render Inwards
-      const inwardTbody = document.getElementById("inwardsTbody");
-
-      if (!data.inwards.length) {
-        inwardTbody.innerHTML = `
-          <tr>
-            <td colspan="4" style="text-align:center; padding:20px; color:#999;">
-              No records found.
-            </td>
-          </tr>`;
-      } else {
-
-        const rowsToShow = (month && year)
-          ? data.inwards
-          : data.inwards.slice(0, 5);
-
-        inwardTbody.innerHTML = rowsToShow.map(r => {
-
-          const isPending =
-            r.reply_required === "Yes" && !r.reply_sent_date;
-
-          return `
-              <tr 
-                class="record-row ${isPending ? 'pending-row' : ''}"
-                data-type="inward"
-                data-id="${r.s_no}"
-              >
-              <td>
-                <strong>${r.inward_no}</strong>
-                ${isPending ? `<span class="pending-badge">Pending</span>` : ''}
-              </td>
-              <td>${formatDate(r.date_of_receipt)}</td>
-              <td>${r.name_of_sender}</td>
-              <td>${r.received_in}</td>
-            </tr>
-          `;
-        }).join("");
-      }
+      const inwardRowsToShow = (month && year)
+        ? data.inwards
+        : data.inwards.slice(0, 5);
+      renderInwardTable(inwardRowsToShow);
 
       // Render Outwards
-      const outwardTbody = document.getElementById("outwardsTbody");
-
-      if (!data.outwards.length) {
-        outwardTbody.innerHTML = `
-          <tr>
-            <td colspan="4" style="text-align:center; padding:20px; color:#999;">
-              No records found.
-            </td>
-          </tr>`;
-      } else {
-
-        const rowsToShow = (month && year)
-          ? data.outwards
-          : data.outwards.slice(0, 5);
-
-        outwardTbody.innerHTML = rowsToShow.map(r => `
-            <tr 
-              class="record-row"
-              data-type="outward"
-              data-id="${r.s_no}"
-            >
-            <td><strong>${r.outward_no}</strong></td>
-            <td>${formatDate(r.date_of_despatch)}</td>
-            <td>${r.name_of_receiver}</td>
-            <td>${r.reply_from}</td>
-          </tr>
-        `).join("");
-      }
+      const outwardRowsToShow = (month && year)
+        ? data.outwards
+        : data.outwards.slice(0, 5);
+      renderOutwardTable(outwardRowsToShow);
 
     } catch (err) {
       console.error("loadDashboard error:", err);
       alert("Failed to load dashboard data");
+    }
+  }
+
+  async function loadPendingReplies(month = null, year = null) {
+    try {
+      let url = "/dashboard/replies-pending";
+
+      if (month && year) {
+        url += `?month=${month}&year=${year}`;
+      }
+
+      const data = await apiFetch(url);
+      renderInwardTable(data.inwards || []);
+    } catch (err) {
+      console.error("loadPendingReplies error:", err);
+      alert("Failed to load pending replies");
     }
   }
 
@@ -855,15 +877,10 @@ document.getElementById("entryType")?.addEventListener("change", () => {
 
           setActiveCard("cardPending");
 
-          const rows = document.querySelectorAll("#inwardsTbody tr");
+          const month = document.getElementById("dashMonth").value;
+          const year = document.getElementById("dashYear").value;
 
-          rows.forEach(row => {
-            if (!row.classList.contains("pending-row")) {
-              row.style.display = "none";
-            } else {
-              row.style.display = "";
-            }
-          });
+          loadPendingReplies(month || null, year || null);
 
           document.getElementById("inwardsTable")
             ?.scrollIntoView({ behavior: "smooth" });
