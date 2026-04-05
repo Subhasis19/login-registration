@@ -39,6 +39,9 @@
                 <i class="fa-solid fa-eye toggle-password"
                     onclick="togglePassword('fp_new_password', this)"></i>
             </div>
+            <p style="margin-top: -4px; margin-bottom: 12px; color: #666; font-size: 13px;">
+                Password must be at least 8 characters and include uppercase, lowercase, number, and special character.
+            </p>
 
             <div class="password-container" style="margin-bottom: 12px;">
                 <input type="password" id="fp_confirm_password" placeholder="Confirm New Password" required>
@@ -53,6 +56,7 @@
 
     <p><a href="index.html">Back to Login</a></p>
 
+    <script src="js/password-policy.js"></script>
     <script>
         function togglePassword(id, icon) {
             const input = document.getElementById(id);
@@ -70,38 +74,50 @@
         function show(id) { document.getElementById(id).style.display = "block"; }
         function hide(id) { document.getElementById(id).style.display = "none"; }
         function toast(msg) { alert(msg); }
+        async function postJson(url, payload) {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json().catch(() => ({
+                success: false,
+                message: "Request failed"
+            }));
+
+            if (!res.ok) {
+                throw new Error(data.message || "Request failed");
+            }
+
+            return data;
+        }
 
         // STEP 1 — Send OTP
         document.getElementById("fp_send_otp").addEventListener("click", async () => {
             const email = document.getElementById("fp_email").value.trim();
             if (!email) return toast("Please enter your email.");
 
-            const res = await fetch("/forgot-password", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email })
-            });
-
-            const data = await res.json();
-            if (data.success) {
+            try {
+                await postJson("/forgot-password", { email });
                 toast("OTP sent to your email.");
                 hide("step1"); show("step2");
-            } else {
-                toast(data.message || "Failed to send OTP.");
+            } catch (err) {
+                toast(err.message || "Failed to send OTP.");
             }
         });
 
         // Resend OTP
         document.getElementById("fp_resend_otp").addEventListener("click", async () => {
             const email = document.getElementById("fp_email").value.trim();
-            const res = await fetch("/forgot-password", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, resend: true })
-            });
+            if (!email) return toast("Please enter your email.");
 
-            const data = await res.json();
-            toast(data.success ? "OTP resent." : "Failed to resend OTP.");
+            try {
+                await postJson("/forgot-password", { email, resend: true });
+                toast("OTP resent.");
+            } catch (err) {
+                toast(err.message || "Failed to resend OTP.");
+            }
         });
 
         // STEP 2 — Verify OTP
@@ -110,18 +126,12 @@
             const otp = document.getElementById("fp_otp").value.trim();
             if (!otp) return toast("Please enter the OTP.");
 
-            const res = await fetch("/verify-reset-otp", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, otp })
-            });
-
-            const data = await res.json();
-            if (data.verified) {
+            try {
+                await postJson("/verify-reset-otp", { email, otp });
                 toast("OTP verified. Set your new password.");
                 hide("step2"); show("step3");
-            } else {
-                toast(data.message || "Invalid OTP.");
+            } catch (err) {
+                toast(err.message || "Invalid OTP.");
             }
         });
 
@@ -131,23 +141,18 @@
             const pass = document.getElementById("fp_new_password").value;
             const confirm = document.getElementById("fp_confirm_password").value;
 
-            if (!pass || pass.length < 8)
-                return toast("Password must be at least 8 characters.");
+            const passwordError = window.getPasswordValidationMessage(pass);
+            if (passwordError)
+                return toast(passwordError);
             if (pass !== confirm)
                 return toast("Passwords do not match.");
 
-            const res = await fetch("/reset-password", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password: pass })
-            });
-
-            const data = await res.json();
-            if (data.success) {
+            try {
+                await postJson("/reset-password", { email, password: pass });
                 toast("Password reset successful!");
                 window.location.href = "/index.html";
-            } else {
-                toast(data.message || "Error resetting password.");
+            } catch (err) {
+                toast(err.message || "Error resetting password.");
             }
         });
 
