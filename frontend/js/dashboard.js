@@ -69,6 +69,18 @@
     }
   }
 
+  function getEditEntryType(data) {
+    const hindi = Number(data?.notings_hindi_pages) || 0;
+    const english = Number(data?.notings_english_pages) || 0;
+    const eoffice = Number(data?.eoffice_comments) || 0;
+
+    if (!hindi && !english && eoffice > 0) {
+      return "Comment";
+    }
+
+    return "Noting";
+  }
+
   function resetNotingsForm() {
     document.getElementById("notingsMonth").value = "";
     document.getElementById("notingsYear").value = "";
@@ -575,7 +587,6 @@ document.getElementById("entryType")?.addEventListener("change", () => {
       const month = document.getElementById("notingsMonth").value;
       const year = document.getElementById("notingsYear").value;
       const entry_type = document.getElementById("entryType").value;
-      const isComment = entry_type === "Comment";
       const btn = document.getElementById("saveNotingsBtn");
       const msg = document.getElementById("notingsMsg");
 
@@ -598,11 +609,11 @@ document.getElementById("entryType")?.addEventListener("change", () => {
         const data = await apiFetch(url);
 
         if (data.exists) {
-          if (!isAdminEdit && isComment && data.allowResubmit && data.status !== "confirmed") {
+          if ((data.allowUpdate || data.allowResubmit) && data.status !== "confirmed") {
             btn.disabled = false;
             setMessage(
               msg,
-              data.message || "A comment entry already exists for this month. Saving again will update its value.",
+              data.message || "A monthly record already exists for this month. Saving will update it.",
               "green"
             );
             return;
@@ -638,11 +649,12 @@ document.getElementById("entryType")?.addEventListener("change", () => {
       if (!res.ok) throw new Error("Failed to fetch noting");
 
       const data = await res.json();
+      const entryType = getEditEntryType(data);
 
       document.getElementById("notingsMonth").value = data.month;
       document.getElementById("notingsYear").value = data.year;
-      document.getElementById("entryType").value = data.entry_type;
-      toggleNotingsFields(data.entry_type);
+      document.getElementById("entryType").value = entryType;
+      toggleNotingsFields(entryType);
       document.getElementById("notingsHindi").value = data.notings_hindi_pages;
       document.getElementById("notingsEnglish").value = data.notings_english_pages;
       document.getElementById("notingsEoffice").value = data.eoffice_comments;

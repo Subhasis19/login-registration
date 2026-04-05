@@ -3,6 +3,11 @@ const router = express.Router();
 const { pool: db } = require("../db");
 const { requireLogin, requireAdmin } = require("../middlewares/authMiddleware");
 
+const ENTRY_TYPES = {
+    NOTING: "Noting",
+    COMMENT: "Comment",
+};
+
 function dbQuery(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.query(sql, params, (err, rows) => {
@@ -15,11 +20,17 @@ function dbQuery(sql, params = []) {
     });
 }
 
+function normalizeEntryType(value) {
+    return value === ENTRY_TYPES.NOTING || value === ENTRY_TYPES.COMMENT
+        ? value
+        : "";
+}
+
 function getNotingsPayload(body) {
     return {
         month: Number(body.month),
         year: Number(body.year),
-        entryType: body.entry_type,
+        entryType: normalizeEntryType(body.entry_type),
         hindi: Number(body.hindi) || 0,
         english: Number(body.english) || 0,
         eoffice: Number(body.eoffice) || 0,
@@ -31,7 +42,184 @@ function hasRequiredFields({ month, year, entryType }) {
 }
 
 function isCommentEntry(entryType) {
-    return entryType === "Comment";
+    return entryType === ENTRY_TYPES.COMMENT;
+}
+
+function hasNotingValues(row) {
+    return (Number(row?.notings_hindi_pages) || 0) > 0
+        || (Number(row?.notings_english_pages) || 0) > 0;
+}
+
+function buildStoredValues(payload, currentRow = null) {
+    const nextValues = {
+        hindi: Number(currentRow?.notings_hindi_pages) || 0,
+        english: Number(currentRow?.notings_english_pages) || 0,
+        eoffice: Number(currentRow?.eoffice_comments) || 0,
+    };
+
+    if (isCommentEntry(payload.entryType)) {
+        nextValues.eoffice = payload.eoffice;
+    } else {
+        nextValues.hindi = payload.hindi;
+        nextValues.english = payload.english;
+    }
+
+    return nextValues;
+}
+
+async function getMonthlyNotingRow(groupName, month, year) {
+    const rows = await dbQuery(
+        `
+            SELECT
+                id,
+                group_name,
+                month,
+                year,
+                status,
+                notings_hindi_pages,
+                notings_english_pages,
+                eoffice_comments
+            FROM notings_records
+            WHERE group_name = ? AND month = ? AND year = ?
+            LIMIT 1
+        `,
+        [groupName, month, year]
+    );
+
+    return rows[0] || null;
+}
+
+async function getNotingRowById(id) {
+    const rows = await dbQuery(
+        `
+            SELECT
+                id,
+                group_name,
+                month,
+                year,
+                status,
+                notings_hindi_pages,
+                notings_english_pages,
+                eoffice_comments
+            FROM notings_records
+            WHERE id = ?
+            LIMIT 1
+        `,
+        [id]
+    );
+
+    return rows[0] || null;
+}
+
+async function getConflictingMonthlyRow(groupName, month, year, excludedId) {
+    const rows = await dbQuery(
+        `
+            SELECT id, status
+            FROM notings_records
+            WHERE group_name = ? AND month = ? AND year = ? AND id <> ?
+            LIMIT 1
+        `,
+        [groupName, month, year, excludedId]
+    );
+
+    return rows[0] || null;
+}
+
+async function insertMonthlyRow(groupName, payload) {
+    const values = buildStoredValues(payload);
+
+    const result = await dbQuery(
+        `
+            INSERT INTO notings_records
+            (group_name, month, year, entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+        `,
+        [
+            groupName,
+            payload.month,
+            payload.year,
+            payload.entryType || ENTRY_TYPES.NOTING,
+            values.hindi,
+            values.english,
+            values.eoffice,
+        ]
+    );
+
+    return result.insertId;
+}
+
+async function updateMonthlyRow(id, payload, currentRow) {
+    const values = buildStoredValues(payload, currentRow);
+
+    return dbQuery(
+        `
+            UPDATE notings_records
+            SET month = ?,
+                year = ?,
+                notings_hindi_pages = ?,
+                notings_english_pages = ?,
+                eoffice_comments = ?
+            WHERE id = ?
+        `,
+        [
+            payload.month,
+            payload.year,
+            values.hindi,
+            values.english,
+            values.eoffice,
+            id,
+        ]
+    );
+}
+
+function buildUserCheckResponse(row, payload) {
+    if (!row) {
+        return { exists: false };
+    }
+
+    if (row.status === "confirmed") {
+        return {
+            exists: true,
+            status: row.status,
+            message: "This monthly record is already confirmed and cannot be modified.",
+        };
+    }
+
+    if (isCommentEntry(payload.entryType)) {
+        return {
+            exists: true,
+            status: row.status,
+            allowUpdate: true,
+            message: "A monthly record already exists for this month. Saving again will update the comment value.",
+        };
+    }
+
+    if (!hasNotingValues(row)) {
+        return {
+            exists: true,
+            status: row.status,
+            allowUpdate: true,
+            message: "A monthly record already exists for this month. Saving will add the noting values.",
+        };
+    }
+
+    return {
+        exists: true,
+        status: row.status,
+        message: "Noting values already submitted for this month. Waiting for admin approval.",
+    };
+}
+
+function buildSubmitSuccessMessage({ entryType, rowExisted, userRole }) {
+    if (userRole === "admin" && rowExisted) {
+        return "Updated successfully";
+    }
+
+    if (isCommentEntry(entryType)) {
+        return rowExisted ? "Comment updated successfully" : "Comment saved successfully";
+    }
+
+    return rowExisted ? "Updated successfully" : "Submitted successfully";
 }
 
 // =========================
@@ -41,7 +229,6 @@ router.post("/notings/save", requireLogin, async (req, res) => {
     const groupName = req.session.user.group;
     const userRole = req.session.user.role;
     const payload = getNotingsPayload(req.body);
-    const isComment = isCommentEntry(payload.entryType);
 
     if (!hasRequiredFields(payload)) {
         return res.status(400).json({
@@ -51,83 +238,44 @@ router.post("/notings/save", requireLogin, async (req, res) => {
     }
 
     try {
-        const existingRows = await dbQuery(
-            `
-                SELECT id, status
-                FROM notings_records
-                WHERE group_name = ? AND month = ? AND year = ? AND entry_type = ?
-            `,
-            [groupName, payload.month, payload.year, payload.entryType]
-        );
+        const currentRow = await getMonthlyNotingRow(groupName, payload.month, payload.year);
 
-        if (existingRows.length > 0) {
-            if (existingRows[0].status === "confirmed") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Already confirmed. Cannot modify.",
-                });
-            }
+        if (!currentRow) {
+            await insertMonthlyRow(groupName, payload);
 
-            if (userRole !== "admin" && !isComment) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Already submitted. Waiting for admin approval.",
-                });
-            }
+            return res.json({
+                success: true,
+                message: buildSubmitSuccessMessage({
+                    entryType: payload.entryType,
+                    rowExisted: false,
+                    userRole,
+                }),
+            });
         }
 
-        const sql = isComment
-            ? `
-                INSERT INTO notings_records
-                (group_name, month, year, entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments, status)
-                VALUES (?, ?, ?, ?, 0, 0, ?, 'pending')
-                ON DUPLICATE KEY UPDATE
-                    eoffice_comments = VALUES(eoffice_comments)
-            `
-            : `
-                INSERT INTO notings_records
-                (group_name, month, year, entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments, status)
-                VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')
-                ON DUPLICATE KEY UPDATE
-                    notings_hindi_pages = VALUES(notings_hindi_pages),
-                    notings_english_pages = VALUES(notings_english_pages)
-            `;
-
-        const params = isComment
-            ? [
-                groupName,
-                payload.month,
-                payload.year,
-                payload.entryType,
-                payload.eoffice,
-            ]
-            : [
-                groupName,
-                payload.month,
-                payload.year,
-                payload.entryType,
-                payload.hindi,
-                payload.english,
-            ];
-
-        await dbQuery(
-            sql,
-            params
-        );
-
-        let message = "Submitted successfully";
-
-        if (existingRows.length > 0) {
-            message = isComment ? "Comment updated successfully" : "Updated successfully";
-        } else if (isComment) {
-            message = "Comment saved successfully";
+        if (currentRow.status === "confirmed") {
+            return res.status(400).json({
+                success: false,
+                message: "Already confirmed. Cannot modify.",
+            });
         }
+
+        if (!isCommentEntry(payload.entryType) && userRole !== "admin" && hasNotingValues(currentRow)) {
+            return res.status(400).json({
+                success: false,
+                message: "Already submitted. Waiting for admin approval.",
+            });
+        }
+
+        await updateMonthlyRow(currentRow.id, payload, currentRow);
 
         res.json({
             success: true,
-            message: userRole === "admin" && existingRows.length > 0
-                ? "Updated successfully"
-                : message,
+            message: buildSubmitSuccessMessage({
+                entryType: payload.entryType,
+                rowExisted: true,
+                userRole,
+            }),
         });
     } catch (err) {
         console.error("Notings save error:", err);
@@ -144,39 +292,14 @@ router.post("/notings/save", requireLogin, async (req, res) => {
 router.get("/notings/check", requireLogin, async (req, res) => {
     const groupName = req.session.user.group;
     const payload = getNotingsPayload(req.query);
-    const isComment = isCommentEntry(payload.entryType);
 
     if (!hasRequiredFields(payload)) {
         return res.json({ exists: false });
     }
 
     try {
-        const rows = await dbQuery(
-            `
-                SELECT id, status
-                FROM notings_records
-                WHERE group_name = ? AND month = ? AND year = ? AND entry_type = ?
-            `,
-            [groupName, payload.month, payload.year, payload.entryType]
-        );
-
-        if (rows.length === 0) {
-            return res.json({ exists: false });
-        }
-
-        if (isComment && rows[0].status !== "confirmed") {
-            return res.json({
-                exists: true,
-                status: rows[0].status,
-                allowResubmit: true,
-                message: "A comment entry already exists for this month. Saving again will update its value.",
-            });
-        }
-
-        res.json({
-            exists: true,
-            status: rows[0].status,
-        });
+        const row = await getMonthlyNotingRow(groupName, payload.month, payload.year);
+        res.json(buildUserCheckResponse(row, payload));
     } catch (err) {
         console.error("Check status error:", err);
         res.json({ exists: false });
@@ -195,46 +318,35 @@ router.get("/admin/notings/check", requireAdmin, async (req, res) => {
     }
 
     try {
-        const currentRows = await dbQuery(
-            `
-                SELECT id, group_name, status
-                FROM notings_records
-                WHERE id = ?
-            `,
-            [editId]
-        );
+        const currentRow = await getNotingRowById(editId);
 
-        if (currentRows.length === 0) {
+        if (!currentRow) {
             return res.status(404).json({
                 exists: true,
                 message: "Noting record not found.",
             });
         }
 
-        const current = currentRows[0];
-
-        if (current.status === "confirmed") {
+        if (currentRow.status === "confirmed") {
             return res.json({
                 exists: true,
-                status: current.status,
+                status: currentRow.status,
                 message: "This record is already confirmed and cannot be modified.",
             });
         }
 
-        const duplicateRows = await dbQuery(
-            `
-                SELECT id, status
-                FROM notings_records
-                WHERE group_name = ? AND month = ? AND year = ? AND entry_type = ? AND id <> ?
-            `,
-            [current.group_name, payload.month, payload.year, payload.entryType, editId]
+        const conflictingRow = await getConflictingMonthlyRow(
+            currentRow.group_name,
+            payload.month,
+            payload.year,
+            editId
         );
 
-        if (duplicateRows.length > 0) {
+        if (conflictingRow) {
             return res.json({
                 exists: true,
-                status: duplicateRows[0].status,
-                message: "Another submission already exists for this group, month, year and entry type.",
+                status: conflictingRow.status,
+                message: "Another monthly record already exists for this group, month and year.",
             });
         }
 
@@ -260,7 +372,15 @@ router.get("/admin/notings", requireAdmin, async (req, res) => {
 
     try {
         let sql = `
-            SELECT *
+            SELECT
+                id,
+                group_name,
+                month,
+                year,
+                notings_hindi_pages,
+                notings_english_pages,
+                eoffice_comments,
+                status
             FROM notings_records
             WHERE month = ? AND year = ?
         `;
@@ -272,7 +392,7 @@ router.get("/admin/notings", requireAdmin, async (req, res) => {
             params.push(group);
         }
 
-        sql += " ORDER BY id DESC";
+        sql += " ORDER BY group_name ASC, id DESC";
 
         const rows = await dbQuery(sql, params);
         res.json(rows);
@@ -324,29 +444,13 @@ router.get("/admin/notings/:id", requireAdmin, async (req, res) => {
     }
 
     try {
-        const rows = await dbQuery(
-            `
-                SELECT
-                    id,
-                    group_name,
-                    month,
-                    year,
-                    entry_type,
-                    notings_hindi_pages,
-                    notings_english_pages,
-                    eoffice_comments,
-                    status
-                FROM notings_records
-                WHERE id = ?
-            `,
-            [id]
-        );
+        const row = await getNotingRowById(id);
 
-        if (!rows.length) {
+        if (!row) {
             return res.status(404).json({ message: "Not found" });
         }
 
-        res.json(rows[0]);
+        res.json(row);
     } catch (err) {
         console.error("Fetch single noting error:", err);
         res.status(500).json({ message: "Database error" });
@@ -375,77 +479,37 @@ router.patch("/admin/notings/:id", requireAdmin, async (req, res) => {
     }
 
     try {
-        const currentRows = await dbQuery(
-            `
-                SELECT id, group_name, status, notings_hindi_pages, notings_english_pages, eoffice_comments
-                FROM notings_records
-                WHERE id = ?
-            `,
-            [id]
-        );
+        const currentRow = await getNotingRowById(id);
 
-        if (currentRows.length === 0) {
+        if (!currentRow) {
             return res.status(404).json({
                 success: false,
                 message: "Noting record not found",
             });
         }
 
-        const current = currentRows[0];
-        const nextHindi = isCommentEntry(payload.entryType)
-            ? current.notings_hindi_pages
-            : payload.hindi;
-        const nextEnglish = isCommentEntry(payload.entryType)
-            ? current.notings_english_pages
-            : payload.english;
-        const nextEoffice = isCommentEntry(payload.entryType)
-            ? payload.eoffice
-            : current.eoffice_comments;
-
-        if (current.status === "confirmed") {
+        if (currentRow.status === "confirmed") {
             return res.status(400).json({
                 success: false,
                 message: "Already confirmed. Cannot modify.",
             });
         }
 
-        const duplicateRows = await dbQuery(
-            `
-                SELECT id
-                FROM notings_records
-                WHERE group_name = ? AND month = ? AND year = ? AND entry_type = ? AND id <> ?
-            `,
-            [current.group_name, payload.month, payload.year, payload.entryType, id]
+        const conflictingRow = await getConflictingMonthlyRow(
+            currentRow.group_name,
+            payload.month,
+            payload.year,
+            id
         );
 
-        if (duplicateRows.length > 0) {
+        if (conflictingRow) {
             return res.status(400).json({
                 success: false,
-                message: "Another submission already exists for this group, month, year and entry type.",
+                message: "Another monthly record already exists for this group, month and year.",
             });
         }
 
-        const result = await dbQuery(
-            `
-                UPDATE notings_records
-                SET month = ?,
-                    year = ?,
-                    entry_type = ?,
-                    notings_hindi_pages = ?,
-                    notings_english_pages = ?,
-                    eoffice_comments = ?
-                WHERE id = ?
-            `,
-            [
-                payload.month,
-                payload.year,
-                payload.entryType,
-                nextHindi,
-                nextEnglish,
-                nextEoffice,
-                id,
-            ]
-        );
+        const result = await updateMonthlyRow(id, payload, currentRow);
 
         if (!result.affectedRows) {
             return res.status(404).json({

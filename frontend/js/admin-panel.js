@@ -1545,11 +1545,11 @@ async function loadNotingsAdmin() {
 
   // Prevent useless API call
   if (!month || !year) {
-      tbody.innerHTML = `<tr><td colspan="8">Select Month and Year</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">Select Month and Year</td></tr>`;
       return;
     }
 
-  tbody.innerHTML = `<tr><td colspan="8">Loading...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="7">Loading...</td></tr>`;
 
   try {
     let url = `/admin/notings?month=${month}&year=${year}`;
@@ -1565,7 +1565,7 @@ async function loadNotingsAdmin() {
     const data = await res.json();
 
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="8">No records found</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">No records found</td></tr>`;
       return;
     }
 
@@ -1573,7 +1573,6 @@ async function loadNotingsAdmin() {
       <tr>
         <td>${r.group_name}</td>
         <td>${r.month}/${r.year}</td>
-        <td>${r.entry_type}</td>
         <td>${r.notings_hindi_pages}</td>
         <td>${r.notings_english_pages}</td>
         <td>${r.eoffice_comments ?? 0}</td>

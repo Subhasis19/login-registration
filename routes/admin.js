@@ -96,12 +96,20 @@ async function calculateReportData(month, year, office = "", group = "") {
     const emailReplied = { A: 0, B: 0, C: 0 };
     emailRepliedRows.forEach(r => { emailReplied[r.region] = r.total || 0; });
 
-    const notingsRows = await dbQuery(`SELECT entry_type, notings_hindi_pages, notings_english_pages, eoffice_comments FROM notings_records WHERE month = ? AND year = ? ${group ? "AND group_name = ?" : ""}`, group ? [month, year, group] : [month, year]);
-    let notingsHindi = 0, notingsEnglish = 0, notingsEoffice = 0;
-    notingsRows.forEach(row => {
-        if (row.entry_type === "Noting") { notingsHindi += row.notings_hindi_pages || 0; notingsEnglish += row.notings_english_pages || 0; }
-        if (row.entry_type === "Comment") { notingsEoffice += row.eoffice_comments || 0; }
-    });
+    const notingsRows = await dbQuery(
+        `
+            SELECT
+                COALESCE(SUM(notings_hindi_pages), 0) AS totalHindi,
+                COALESCE(SUM(notings_english_pages), 0) AS totalEnglish,
+                COALESCE(SUM(eoffice_comments), 0) AS totalComments
+            FROM notings_records
+            WHERE month = ? AND year = ? ${group ? "AND group_name = ?" : ""}
+        `,
+        group ? [month, year, group] : [month, year]
+    );
+    const notingsHindi = Number(notingsRows[0]?.totalHindi) || 0;
+    const notingsEnglish = Number(notingsRows[0]?.totalEnglish) || 0;
+    const notingsEoffice = Number(notingsRows[0]?.totalComments) || 0;
 
     let groupName = "", groupHeadName = "";
     if (group) {
