@@ -65,7 +65,7 @@ function normalizeNumber(value) {
   return Number(value) || 0;
 }
 
-function buildInwardByRegion(rowsInwardRegion, rowsOutwardReplyRegion) {
+function buildInwardByRegion(rowsByRegion) {
   const inwardByRegion = {
     A: getEmptyInwardByRegion(),
     B: getEmptyInwardByRegion(),
@@ -73,20 +73,15 @@ function buildInwardByRegion(rowsInwardRegion, rowsOutwardReplyRegion) {
     [UNKNOWN_REGION]: getEmptyInwardByRegion(),
   };
 
-  rowsInwardRegion.forEach((row) => {
+  rowsByRegion.forEach((row) => {
     const region = row.region || UNKNOWN_REGION;
     inwardByRegion[region] = {
       ...getEmptyInwardByRegion(),
       receivedEnglish: normalizeNumber(row.receivedEnglish),
       notExpected: normalizeNumber(row.notExpected),
+      repliedHindi: normalizeNumber(row.repliedHindi),
+      repliedEnglish: normalizeNumber(row.repliedEnglish),
     };
-  });
-
-  rowsOutwardReplyRegion.forEach((row) => {
-    const region = row.region || UNKNOWN_REGION;
-    inwardByRegion[region] ||= getEmptyInwardByRegion();
-    inwardByRegion[region].repliedHindi = normalizeNumber(row.repliedHindi);
-    inwardByRegion[region].repliedEnglish = normalizeNumber(row.repliedEnglish);
   });
 
   return inwardByRegion;
@@ -190,24 +185,14 @@ async function fetchLetterMetrics(scope) {
         SELECT
           COALESCE(sender_region, '${UNKNOWN_REGION}') AS region,
           SUM(language_of_document = 'English') AS receivedEnglish,
-          SUM(language_of_document = 'English' AND reply_required = 'No') AS notExpected
+          SUM(language_of_document = 'English' AND reply_required = 'No') AS notExpected,
+          SUM(language_of_document = 'English' AND reply_sent_in = 'Hindi') AS repliedHindi,
+          SUM(language_of_document = 'English' AND reply_sent_in = 'English') AS repliedEnglish
         FROM inward_records
         WHERE ${scope.inwardWhereSql}
         GROUP BY region
       `,
       scope.inwardParams
-    ),
-    dbQuery(
-      `
-        SELECT
-          COALESCE(receiver_region, '${UNKNOWN_REGION}') AS region,
-          SUM(language_of_document = 'English' AND reply_sent_in = 'Hindi') AS repliedHindi,
-          SUM(language_of_document = 'English' AND reply_sent_in = 'English') AS repliedEnglish
-        FROM outward_records
-        WHERE ${scope.outwardWhereSql}
-        GROUP BY region
-      `,
-      scope.outwardParams
     ),
     dbQuery(
       `
@@ -233,14 +218,13 @@ async function fetchLetterMetrics(scope) {
 
   const [
     rowsInwardRegion,
-    rowsOutwardReplyRegion,
     rowsSection3,
     totalInward,
     totalOutward,
   ] = await Promise.all(queries);
 
   return {
-    inwardByRegion: buildInwardByRegion(rowsInwardRegion, rowsOutwardReplyRegion),
+    inwardByRegion: buildInwardByRegion(rowsInwardRegion),
     section3ByRegion: buildSection3ByRegion(rowsSection3),
     totalInwards: normalizeNumber(totalInward[0]?.cnt),
     totalOutwards: normalizeNumber(totalOutward[0]?.cnt),
@@ -349,4 +333,5 @@ async function calculateReportData(month, year, office = "", group = "") {
 module.exports = {
   calculateReportData,
 };
+
 
