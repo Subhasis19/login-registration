@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const { pool: db, dbQuery } = require("../db");
+const { requireLogin } = require("../middlewares/authMiddleware");
 require("dotenv").config();
 
 const OTP_PURPOSES = {
@@ -287,13 +288,7 @@ router.post("/login", (req, res) => {
 // =========================
 // SESSION INFO & LOGOUT
 // =========================
-router.get("/session-info", (req, res) => {
-  if (!req.session.user) {
-    if (req.xhr || req.headers.accept?.includes("application/json")) {
-      return res.status(401).json({ success: false, message: "Not logged in" });
-    }
-    return res.redirect("/");
-  }
+router.get("/session-info", requireLogin, (req, res) => {
   res.json({ loggedIn: true, user: req.session.user });
 });
 
