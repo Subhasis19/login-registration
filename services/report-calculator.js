@@ -7,14 +7,8 @@ const UNKNOWN_REGION = "Unknown";
 function buildScope(month, year, office = "", group = "") {
   const { start, end } = getMonthDateRange(year, month);
 
-  const inwardWhere = [
-    "date_of_receipt >= ?",
-    "date_of_receipt < ?",
-  ];
-  const outwardWhere = [
-    "date_of_despatch >= ?",
-    "date_of_despatch < ?",
-  ];
+  const inwardWhere = ["date_of_receipt >= ?", "date_of_receipt < ?"];
+  const outwardWhere = ["date_of_despatch >= ?", "date_of_despatch < ?"];
   const inwardParams = [start, end];
   const outwardParams = [start, end];
 
@@ -36,14 +30,27 @@ function buildScope(month, year, office = "", group = "") {
     month,
     year,
     group,
-    inwardParams,
-    outwardParams,
     inwardWhereSql: inwardWhere.join(" AND "),
     outwardWhereSql: outwardWhere.join(" AND "),
+    inwardParams,
+    outwardParams,
   };
 }
 
-function getEmptyInwardByRegion() {
+function normalizeNumber(value) {
+  return Number(value) || 0;
+}
+
+function readCount(rows) {
+  return normalizeNumber(rows[0]?.cnt);
+}
+
+function createRegionMap(createValue, includeUnknown = false) {
+  const regions = includeUnknown ? [...REGIONS, UNKNOWN_REGION] : REGIONS;
+  return Object.fromEntries(regions.map((region) => [region, createValue()]));
+}
+
+function createSection2Region() {
   return {
     receivedEnglish: 0,
     notExpected: 0,
@@ -52,7 +59,7 @@ function getEmptyInwardByRegion() {
   };
 }
 
-function getEmptySection3Region() {
+function createSection3Region() {
   return {
     hindi: 0,
     english: 0,
@@ -61,22 +68,32 @@ function getEmptySection3Region() {
   };
 }
 
-function normalizeNumber(value) {
-  return Number(value) || 0;
+function createEmailReceivedRegion() {
+  return {
+    eng: 0,
+    hin: 0,
+  };
 }
 
-function buildInwardByRegion(rowsByRegion) {
-  const inwardByRegion = {
-    A: getEmptyInwardByRegion(),
-    B: getEmptyInwardByRegion(),
-    C: getEmptyInwardByRegion(),
-    [UNKNOWN_REGION]: getEmptyInwardByRegion(),
-  };
+function isKnownRegion(region) {
+  return REGIONS.includes(region);
+}
 
-  rowsByRegion.forEach((row) => {
+function buildMonthlyGroupFilter(scope) {
+  return {
+    groupClause: scope.group ? "AND group_name = ?" : "",
+    params: scope.group
+      ? [scope.month, scope.year, scope.group]
+      : [scope.month, scope.year],
+  };
+}
+
+function buildSection2ByRegion(rows) {
+  const inwardByRegion = createRegionMap(createSection2Region, true);
+
+  rows.forEach((row) => {
     const region = row.region || UNKNOWN_REGION;
     inwardByRegion[region] = {
-      ...getEmptyInwardByRegion(),
       receivedEnglish: normalizeNumber(row.receivedEnglish),
       notExpected: normalizeNumber(row.notExpected),
       repliedHindi: normalizeNumber(row.repliedHindi),
@@ -87,15 +104,10 @@ function buildInwardByRegion(rowsByRegion) {
   return inwardByRegion;
 }
 
-function buildSection3ByRegion(rowsSection3) {
-  const section3ByRegion = {
-    A: getEmptySection3Region(),
-    B: getEmptySection3Region(),
-    C: getEmptySection3Region(),
-    [UNKNOWN_REGION]: getEmptySection3Region(),
-  };
+function buildSection3ByRegion(rows) {
+  const section3ByRegion = createRegionMap(createSection3Region, true);
 
-  rowsSection3.forEach((row) => {
+  rows.forEach((row) => {
     const region = row.region || UNKNOWN_REGION;
     const hindi = normalizeNumber(row.hindiPlusBilingual);
     const english = normalizeNumber(row.english);
@@ -113,14 +125,10 @@ function buildSection3ByRegion(rowsSection3) {
 }
 
 function buildEmailReceived(rows) {
-  const emailReceived = {
-    A: { eng: 0, hin: 0 },
-    B: { eng: 0, hin: 0 },
-    C: { eng: 0, hin: 0 },
-  };
+  const emailReceived = createRegionMap(createEmailReceivedRegion);
 
   rows.forEach((row) => {
-    if (!REGIONS.includes(row.region)) {
+    if (!isKnownRegion(row.region)) {
       return;
     }
 
@@ -134,10 +142,10 @@ function buildEmailReceived(rows) {
 }
 
 function buildEmailReplied(rows) {
-  const emailReplied = { A: 0, B: 0, C: 0 };
+  const emailReplied = Object.fromEntries(REGIONS.map((region) => [region, 0]));
 
   rows.forEach((row) => {
-    if (!REGIONS.includes(row.region)) {
+    if (!isKnownRegion(row.region)) {
       return;
     }
 
@@ -147,39 +155,56 @@ function buildEmailReplied(rows) {
   return emailReplied;
 }
 
-async function fetchSection1Metrics(scope) {
-  const queries = [
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND language_of_document = 'Hindi'`,
-      scope.inwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_required = 'No'`,
-      scope.inwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_sent_in = 'Hindi'`,
-      scope.inwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_sent_in = 'English'`,
-      scope.inwardParams
-    ),
-  ];
+function queryScopedCount(tableName, whereSql, params, predicateSql) {
+  return dbQuery(
+    `SELECT COUNT(*) AS cnt FROM ${tableName} WHERE ${whereSql} AND ${predicateSql}`,
+    params
+  );
+}
 
+function queryTotalCount(tableName, whereSql, params) {
+  return dbQuery(`SELECT COUNT(*) AS cnt FROM ${tableName} WHERE ${whereSql}`, params);
+}
+
+async function fetchSection1Metrics(scope) {
   const [rowsHindi, rowsNotExpected, rowsReplyHindi, rowsReplyEnglish] =
-    await Promise.all(queries);
+    await Promise.all([
+      queryScopedCount(
+        "inward_records",
+        scope.inwardWhereSql,
+        scope.inwardParams,
+        "language_of_document = 'Hindi'"
+      ),
+      queryScopedCount(
+        "inward_records",
+        scope.inwardWhereSql,
+        scope.inwardParams,
+        "reply_required = 'No'"
+      ),
+      queryScopedCount(
+        "inward_records",
+        scope.inwardWhereSql,
+        scope.inwardParams,
+        "reply_sent_in = 'Hindi'"
+      ),
+      queryScopedCount(
+        "inward_records",
+        scope.inwardWhereSql,
+        scope.inwardParams,
+        "reply_sent_in = 'English'"
+      ),
+    ]);
 
   return {
-    lettersReceivedHindi: normalizeNumber(rowsHindi[0]?.cnt),
-    notExpectedTotal: normalizeNumber(rowsNotExpected[0]?.cnt),
-    repliesSentHindi: normalizeNumber(rowsReplyHindi[0]?.cnt),
-    repliesSentEnglish: normalizeNumber(rowsReplyEnglish[0]?.cnt),
+    lettersReceivedHindi: readCount(rowsHindi),
+    notExpectedTotal: readCount(rowsNotExpected),
+    repliesSentHindi: readCount(rowsReplyHindi),
+    repliesSentEnglish: readCount(rowsReplyEnglish),
   };
 }
 
-async function fetchLetterMetrics(scope) {
-  const queries = [
+async function fetchSection2AndSummaryMetrics(scope) {
+  const [rowsByRegion, totalInwardRows, totalOutwardRows] = await Promise.all([
     dbQuery(
       `
         SELECT
@@ -194,22 +219,14 @@ async function fetchLetterMetrics(scope) {
       `,
       scope.inwardParams
     ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql}`,
-      scope.inwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM outward_records WHERE ${scope.outwardWhereSql}`,
-      scope.outwardParams
-    ),
-  ];
-
-  const [rowsInwardRegion, totalInward, totalOutward] = await Promise.all(queries);
+    queryTotalCount("inward_records", scope.inwardWhereSql, scope.inwardParams),
+    queryTotalCount("outward_records", scope.outwardWhereSql, scope.outwardParams),
+  ]);
 
   return {
-    inwardByRegion: buildInwardByRegion(rowsInwardRegion),
-    totalInwards: normalizeNumber(totalInward[0]?.cnt),
-    totalOutwards: normalizeNumber(totalOutward[0]?.cnt),
+    inwardByRegion: buildSection2ByRegion(rowsByRegion),
+    totalInwards: readCount(totalInwardRows),
+    totalOutwards: readCount(totalOutwardRows),
   };
 }
 
@@ -233,27 +250,26 @@ async function fetchSection3Metrics(scope) {
 }
 
 async function fetchEmailMetrics(scope) {
-  const groupClause = scope.group ? "AND group_name = ?" : "";
-  const groupParams = scope.group ? [scope.group] : [];
+  const monthlyGroupFilter = buildMonthlyGroupFilter(scope);
 
   const [emailReceivedRows, emailRepliedRows] = await Promise.all([
     dbQuery(
       `
         SELECT region, SUM(total_english) AS eng, SUM(total_hindi) AS hin
         FROM email_records
-        WHERE month = ? AND year = ? ${groupClause} AND entry_type = 'Received'
+        WHERE month = ? AND year = ? ${monthlyGroupFilter.groupClause} AND entry_type = 'Received'
         GROUP BY region
       `,
-      [scope.month, scope.year, ...groupParams]
+      monthlyGroupFilter.params
     ),
     dbQuery(
       `
         SELECT region, SUM(total_hindi) AS total
         FROM email_records
-        WHERE month = ? AND year = ? ${groupClause} AND entry_type = 'Replied'
+        WHERE month = ? AND year = ? ${monthlyGroupFilter.groupClause} AND entry_type = 'Replied'
         GROUP BY region
       `,
-      [scope.month, scope.year, ...groupParams]
+      monthlyGroupFilter.params
     ),
   ]);
 
@@ -264,10 +280,7 @@ async function fetchEmailMetrics(scope) {
 }
 
 async function fetchNotingsMetrics(scope) {
-  const groupClause = scope.group ? "AND group_name = ?" : "";
-  const params = scope.group
-    ? [scope.month, scope.year, scope.group]
-    : [scope.month, scope.year];
+  const monthlyGroupFilter = buildMonthlyGroupFilter(scope);
 
   const rows = await dbQuery(
     `
@@ -276,9 +289,9 @@ async function fetchNotingsMetrics(scope) {
         COALESCE(SUM(notings_english_pages), 0) AS totalEnglish,
         COALESCE(SUM(eoffice_comments), 0) AS totalComments
       FROM notings_records
-      WHERE month = ? AND year = ? ${groupClause}
+      WHERE month = ? AND year = ? ${monthlyGroupFilter.groupClause}
     `,
-    params
+    monthlyGroupFilter.params
   );
 
   return {
@@ -314,9 +327,16 @@ async function fetchReportSignatory(group) {
 async function calculateReportData(month, year, office = "", group = "") {
   const scope = buildScope(month, year, office, group);
 
-  const [section1Metrics, letterMetrics, section3Metrics, emailMetrics, notingsMetrics, signatory] = await Promise.all([
+  const [
+    section1Metrics,
+    section2AndSummaryMetrics,
+    section3Metrics,
+    emailMetrics,
+    notingsMetrics,
+    signatory,
+  ] = await Promise.all([
     fetchSection1Metrics(scope),
-    fetchLetterMetrics(scope),
+    fetchSection2AndSummaryMetrics(scope),
     fetchSection3Metrics(scope),
     fetchEmailMetrics(scope),
     fetchNotingsMetrics(scope),
@@ -325,7 +345,7 @@ async function calculateReportData(month, year, office = "", group = "") {
 
   return {
     ...section1Metrics,
-    ...letterMetrics,
+    ...section2AndSummaryMetrics,
     ...section3Metrics,
     ...emailMetrics,
     ...notingsMetrics,
@@ -336,6 +356,3 @@ async function calculateReportData(month, year, office = "", group = "") {
 module.exports = {
   calculateReportData,
 };
-
-
-
