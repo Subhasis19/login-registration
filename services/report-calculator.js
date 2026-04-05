@@ -152,24 +152,39 @@ function buildEmailReplied(rows) {
   return emailReplied;
 }
 
-async function fetchLetterMetrics(scope) {
+async function fetchSection1Metrics(scope) {
   const queries = [
     dbQuery(
-      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND language_of_document IN ('Hindi')`,
+      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND language_of_document = 'Hindi'`,
       scope.inwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM outward_records WHERE ${scope.outwardWhereSql} AND reply_sent_in = 'Hindi'`,
-      scope.outwardParams
-    ),
-    dbQuery(
-      `SELECT COUNT(*) AS cnt FROM outward_records WHERE ${scope.outwardWhereSql} AND reply_sent_in = 'English'`,
-      scope.outwardParams
     ),
     dbQuery(
       `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_required = 'No'`,
       scope.inwardParams
     ),
+    dbQuery(
+      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_sent_in = 'Hindi'`,
+      scope.inwardParams
+    ),
+    dbQuery(
+      `SELECT COUNT(*) AS cnt FROM inward_records WHERE ${scope.inwardWhereSql} AND reply_sent_in = 'English'`,
+      scope.inwardParams
+    ),
+  ];
+
+  const [rowsHindi, rowsNotExpected, rowsReplyHindi, rowsReplyEnglish] =
+    await Promise.all(queries);
+
+  return {
+    lettersReceivedHindi: normalizeNumber(rowsHindi[0]?.cnt),
+    notExpectedTotal: normalizeNumber(rowsNotExpected[0]?.cnt),
+    repliesSentHindi: normalizeNumber(rowsReplyHindi[0]?.cnt),
+    repliesSentEnglish: normalizeNumber(rowsReplyEnglish[0]?.cnt),
+  };
+}
+
+async function fetchLetterMetrics(scope) {
+  const queries = [
     dbQuery(
       `
         SELECT
@@ -217,10 +232,6 @@ async function fetchLetterMetrics(scope) {
   ];
 
   const [
-    rowsHindi,
-    rowsReplyHindi,
-    rowsReplyEnglish,
-    rowsNotExpected,
     rowsInwardRegion,
     rowsOutwardReplyRegion,
     rowsSection3,
@@ -229,10 +240,6 @@ async function fetchLetterMetrics(scope) {
   ] = await Promise.all(queries);
 
   return {
-    lettersReceivedHindi: normalizeNumber(rowsHindi[0]?.cnt),
-    repliesSentHindi: normalizeNumber(rowsReplyHindi[0]?.cnt),
-    repliesSentEnglish: normalizeNumber(rowsReplyEnglish[0]?.cnt),
-    notExpectedTotal: normalizeNumber(rowsNotExpected[0]?.cnt),
     inwardByRegion: buildInwardByRegion(rowsInwardRegion, rowsOutwardReplyRegion),
     section3ByRegion: buildSection3ByRegion(rowsSection3),
     totalInwards: normalizeNumber(totalInward[0]?.cnt),
@@ -322,7 +329,8 @@ async function fetchReportSignatory(group) {
 async function calculateReportData(month, year, office = "", group = "") {
   const scope = buildScope(month, year, office, group);
 
-  const [letterMetrics, emailMetrics, notingsMetrics, signatory] = await Promise.all([
+  const [section1Metrics, letterMetrics, emailMetrics, notingsMetrics, signatory] = await Promise.all([
+    fetchSection1Metrics(scope),
     fetchLetterMetrics(scope),
     fetchEmailMetrics(scope),
     fetchNotingsMetrics(scope),
@@ -330,6 +338,7 @@ async function calculateReportData(month, year, office = "", group = "") {
   ]);
 
   return {
+    ...section1Metrics,
     ...letterMetrics,
     ...emailMetrics,
     ...notingsMetrics,
@@ -340,3 +349,4 @@ async function calculateReportData(month, year, office = "", group = "") {
 module.exports = {
   calculateReportData,
 };
+
