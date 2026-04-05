@@ -40,12 +40,24 @@
     });
   }
 
-  let initialNotingsEditId = new URLSearchParams(window.location.search).get("id");
+  const initialDashboardParams = new URLSearchParams(window.location.search);
+  let initialNotingsEditId = initialDashboardParams.get("page") === "notings"
+    ? initialDashboardParams.get("id")
+    : null;
+  let initialEmailEditId = initialDashboardParams.get("page") === "emails"
+    ? initialDashboardParams.get("id")
+    : null;
 
   function getDefaultNotingsTitle() {
     return window.currentUserGroup
       ? `Notings – Monthly Report (${window.currentUserGroup})`
       : "Notings – Monthly Report";
+  }
+
+  function getDefaultEmailsTitle() {
+    return window.currentUserGroup
+      ? `Emails – Monthly Entry (${window.currentUserGroup})`
+      : "Emails – Monthly Entry";
   }
 
   function toggleNotingsFields(entryType = document.getElementById("entryType")?.value) {
@@ -108,6 +120,33 @@
     }
 
     toggleNotingsFields("");
+  }
+
+  function resetEmailsForm() {
+    document.getElementById("emailsMonth").value = "";
+    document.getElementById("emailsYear").value = "";
+    document.getElementById("emailsEntryType").value = "";
+    document.getElementById("emailsRegion").value = "";
+    document.getElementById("emailsEnglish").value = 0;
+    document.getElementById("emailsHindi").value = 0;
+
+    const msg = document.getElementById("emailsMsg");
+    if (msg) {
+      msg.textContent = "";
+      msg.style.color = "#777";
+    }
+
+    const btn = document.getElementById("saveEmailsBtn");
+    if (btn) {
+      btn.textContent = "Save";
+      btn.disabled = false;
+      delete btn.dataset.editId;
+    }
+
+    const title = document.getElementById("emailsTitle");
+    if (title) {
+      title.textContent = getDefaultEmailsTitle();
+    }
   }
 
   function syncDashboardUrl(page, extraParams = {}) {
@@ -479,20 +518,16 @@ async function loadGroups(selectId, defaultText = "All Groups") {
       if (page === "emails") {
       document.getElementById("emailsView").style.display = "block";
       setActiveMenuItem("emails");
-      document.getElementById("emailsMsg").textContent = "";
-      document.getElementById("emailsMonth").value = "";
-      document.getElementById("emailsYear").value = "";
-      document.getElementById("emailsEnglish").value = 0;
-      document.getElementById("emailsHindi").value = 0;
-      document.getElementById("emailsEntryType").value = "";
-      document.getElementById("emailsRegion").value = "";
+      resetEmailsForm();
+      setTimeout(checkEmailsStatus, 100);
 
-      const et = document.getElementById("emailsTitle");
-if (et) {
-  et.textContent = window.currentUserGroup
-    ? `Emails – Monthly Entry (${window.currentUserGroup})`
-    : "Emails – Monthly Entry";
-}
+      if (initialEmailEditId && window.currentUserRole === "admin") {
+        const editId = initialEmailEditId;
+        initialEmailEditId = null;
+        loadEmailForEdit(editId);
+      } else {
+        initialEmailEditId = null;
+      }
 
       return;
     }
@@ -525,6 +560,10 @@ if (et) {
 document.getElementById("entryType")?.addEventListener("change", () => {
   toggleNotingsFields();
   checkNotingsStatus();
+});
+
+["emailsMonth", "emailsYear", "emailsEntryType", "emailsRegion"].forEach(id => {
+  document.getElementById(id)?.addEventListener("change", checkEmailsStatus);
 });
 
 
@@ -708,6 +747,110 @@ document.getElementById("entryType")?.addEventListener("change", () => {
     };
   }
 
+  function validateEmails(payload, msgEl) {
+    if (!payload.month || !payload.year || !payload.entry_type || !payload.region) {
+      setMessage(msgEl, "Please select Month, Year, Entry Type and Region", "red");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function checkEmailsStatus() {
+    const payload = getEmailsPayload();
+    const btn = document.getElementById("saveEmailsBtn");
+    const msg = document.getElementById("emailsMsg");
+
+    if (!payload.month || !payload.year || !payload.entry_type || !payload.region) {
+      if (btn) btn.disabled = false;
+      setMessage(msg, "", "#777");
+      return;
+    }
+
+    const editId = btn?.dataset.editId;
+    const isAdminEdit = Boolean(editId && window.currentUserRole === "admin");
+    const baseUrl = isAdminEdit ? "/admin/emails/check" : "/emails/check";
+    let url = `${baseUrl}?month=${payload.month}&year=${payload.year}&entry_type=${encodeURIComponent(payload.entry_type)}&region=${encodeURIComponent(payload.region)}`;
+
+    if (isAdminEdit) {
+      url += `&id=${encodeURIComponent(editId)}`;
+    }
+
+    try {
+      const data = await apiFetch(url);
+
+      if (data.exists) {
+        if (data.allowUpdate) {
+          btn.disabled = false;
+          setMessage(
+            msg,
+            data.message || "A submission already exists for this month, type and region. Saving again will update it.",
+            "green"
+          );
+          return;
+        }
+
+        btn.disabled = true;
+
+        if (data.status === "confirmed") {
+          setMessage(
+            msg,
+            data.message || "This email record is already confirmed and cannot be modified.",
+            "green"
+          );
+        } else {
+          setMessage(
+            msg,
+            data.message || "Another email record already exists for this month, type and region.",
+            "orange"
+          );
+        }
+        return;
+      }
+
+      btn.disabled = false;
+      setMessage(msg, "", "#777");
+    } catch (err) {
+      console.error("Email check status error:", err);
+      setMessage(msg, "Failed to check status", "red");
+    }
+  }
+
+  async function loadEmailForEdit(id) {
+    try {
+      const res = await fetch(`/admin/emails/${id}`, {
+        credentials: "same-origin"
+      });
+
+      if (!res.ok) throw new Error("Failed to fetch email submission");
+
+      const data = await res.json();
+
+      document.getElementById("emailsMonth").value = data.month;
+      document.getElementById("emailsYear").value = data.year;
+      document.getElementById("emailsEntryType").value = data.entry_type;
+      document.getElementById("emailsRegion").value = data.region;
+      document.getElementById("emailsEnglish").value = data.total_english;
+      document.getElementById("emailsHindi").value = data.total_hindi;
+
+      const btn = document.getElementById("saveEmailsBtn");
+      btn.textContent = "Update";
+      btn.dataset.editId = id;
+      btn.disabled = false;
+
+      const title = document.getElementById("emailsTitle");
+      if (title) {
+        title.textContent = data.group_name
+          ? `Emails – Edit Submission (${data.group_name})`
+          : "Emails – Edit Submission";
+      }
+
+      checkEmailsStatus();
+    } catch (err) {
+      console.error("Email prefill error:", err);
+    }
+  }
+
 
 
 
@@ -733,8 +876,11 @@ document.getElementById("entryType")?.addEventListener("change", () => {
     }
   }
 
+  if (window.currentUserRole === "admin") {
     loadGroups("reportGroup", "All Groups");
     loadGroups("adminNotingsGroup", "All Groups");
+    loadGroups("adminEmailsGroup", "All Groups");
+  }
    
   populateYearDropdown("notingsYear");
   populateYearDropdown("emailsYear");
@@ -1001,15 +1147,18 @@ document.getElementById("saveEmailsBtn")?.addEventListener("click", () => {
   const msg = document.getElementById("emailsMsg");
   if (!msg) return;
 
+  const btn = document.getElementById("saveEmailsBtn");
+  const editId = btn.dataset.editId;
   const payload = getEmailsPayload();
+  const isAdminEdit = Boolean(editId && window.currentUserRole === "admin");
 
-  if (!payload.month || !payload.year || !payload.entry_type || !payload.region) {
-    setMessage(msg, "Please fill all fields", "red");
-    return;
-  }
+  if (!validateEmails(payload, msg)) return;
 
-  apiFetch("/emails/save", {
-    method: "POST",
+  const requestUrl = isAdminEdit ? `/admin/emails/${encodeURIComponent(editId)}` : "/emails/save";
+  const requestMethod = isAdminEdit ? "PATCH" : "POST";
+
+  apiFetch(requestUrl, {
+    method: requestMethod,
     headers: {
       "Content-Type": "application/json"
     },
@@ -1017,6 +1166,7 @@ document.getElementById("saveEmailsBtn")?.addEventListener("click", () => {
   })
     .then(data => {
       setMessage(msg, data.message || "Saved successfully", "green");
+      btn.disabled = false;
     })
     .catch(err => {
       setMessage(msg, err.message || "Error", "red");

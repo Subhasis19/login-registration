@@ -546,6 +546,7 @@ function validateOutwardExcelSchema(rows) {
   window.__adminPanelLoadUsers = function () {
     loadUsers();
     loadNotingsAdmin();
+    loadEmailsAdmin();
   };
   // Init
   document.addEventListener("DOMContentLoaded", () => {
@@ -592,6 +593,10 @@ function validateOutwardExcelSchema(rows) {
     }
     document.getElementById("adminNotingsFilterBtn")?.addEventListener("click", () => {
       loadNotingsAdmin();
+    });
+
+    document.getElementById("adminEmailsFilterBtn")?.addEventListener("click", () => {
+      loadEmailsAdmin();
     });
 
   });
@@ -644,6 +649,13 @@ document.addEventListener("click", function (e) {
   if (notingBtn) {
     const id = notingBtn.dataset.id;
     window.location.href = `/dashboard.html?page=notings&id=${id}`;
+    return;
+  }
+
+  const emailBtn = e.target.closest(".edit-email-btn");
+  if (emailBtn) {
+    const id = emailBtn.dataset.id;
+    window.location.href = `/dashboard.html?page=emails&id=${id}`;
     return;
   }
 
@@ -1533,6 +1545,40 @@ Validate Excel to Enable Import
 
 
 // ===============================
+// ADMIN SUBMISSIONS HELPERS
+// ===============================
+function setAdminSubmissionMessage(tbody, colspan, message) {
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="${colspan}">${message}</td></tr>`;
+}
+
+function buildAdminFilterUrl(basePath, filters) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return `${basePath}?${params.toString()}`;
+}
+
+function populateAdminYearSelect(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+
+  const now = new Date().getFullYear();
+
+  for (let y = now + 2; y >= now - 5; y--) {
+    const o = document.createElement("option");
+    o.value = y;
+    o.textContent = y;
+    sel.appendChild(o);
+  }
+}
+
+// ===============================
 // ADMIN: LOAD NOTINGS
 // ===============================
 async function loadNotingsAdmin() {
@@ -1543,29 +1589,22 @@ async function loadNotingsAdmin() {
   const year = document.getElementById("adminNotingsYear").value;
   const group = document.getElementById("adminNotingsGroup").value;
 
-  // Prevent useless API call
   if (!month || !year) {
-      tbody.innerHTML = `<tr><td colspan="7">Select Month and Year</td></tr>`;
-      return;
-    }
+    setAdminSubmissionMessage(tbody, 7, "Select Month and Year");
+    return;
+  }
 
-  tbody.innerHTML = `<tr><td colspan="7">Loading...</td></tr>`;
+  setAdminSubmissionMessage(tbody, 7, "Loading...");
 
   try {
-    let url = `/admin/notings?month=${month}&year=${year}`;
-
-      if (group) {
-        url += `&group=${encodeURIComponent(group)}`;
-      }
-
-      const res = await fetch(url, {
-        credentials: "same-origin"
-      });
-
+    const res = await fetch(
+      buildAdminFilterUrl("/admin/notings", { month, year, group }),
+      { credentials: "same-origin" }
+    );
     const data = await res.json();
 
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="7">No records found</td></tr>`;
+      setAdminSubmissionMessage(tbody, 7, "No records found");
       return;
     }
 
@@ -1591,9 +1630,68 @@ async function loadNotingsAdmin() {
         </td>
       </tr>
     `).join("");
-
   } catch (err) {
     console.error("Notings load error:", err);
+    setAdminSubmissionMessage(tbody, 7, "Failed to load records");
+  }
+}
+
+// ===============================
+// ADMIN: LOAD EMAILS
+// ===============================
+async function loadEmailsAdmin() {
+  const tbody = document.getElementById("emailsAdminTableBody");
+  if (!tbody) return;
+
+  const month = document.getElementById("adminEmailsMonth").value;
+  const year = document.getElementById("adminEmailsYear").value;
+  const group = document.getElementById("adminEmailsGroup").value;
+
+  if (!month || !year) {
+    setAdminSubmissionMessage(tbody, 8, "Select Month and Year");
+    return;
+  }
+
+  setAdminSubmissionMessage(tbody, 8, "Loading...");
+
+  try {
+    const res = await fetch(
+      buildAdminFilterUrl("/admin/emails", { month, year, group }),
+      { credentials: "same-origin" }
+    );
+    const data = await res.json();
+
+    if (!data.length) {
+      setAdminSubmissionMessage(tbody, 8, "No records found");
+      return;
+    }
+
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td>${r.group_name}</td>
+        <td>${r.month}/${r.year}</td>
+        <td>${r.entry_type}</td>
+        <td>${r.region}</td>
+        <td>${r.total_english}</td>
+        <td>${r.total_hindi}</td>
+        <td>
+          ${r.status === "confirmed"
+            ? "<span style='color:green;font-weight:600'>Confirmed</span>"
+            : "<span style='color:orange'>Pending</span>"
+          }
+        </td>
+        <td>
+          ${r.status === "confirmed"
+            ? "-"
+            : `<button class="btn-small edit-email-btn" data-id="${r.id}">Edit</button>
+               <button class="btn-small confirm-email-btn" data-id="${r.id}">Confirm</button>`
+          }
+        </td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    console.error("Emails load error:", err);
+    setAdminSubmissionMessage(tbody, 8, "Failed to load records");
   }
 }
 
@@ -1624,7 +1722,7 @@ document.addEventListener("click", async (e) => {
 
     if (data.success) {
       alert("Confirmed successfully");
-      loadNotingsAdmin(); // reload table
+      loadNotingsAdmin();
     }
 
   } catch (err) {
@@ -1633,18 +1731,40 @@ document.addEventListener("click", async (e) => {
 
 });
 
+document.addEventListener("click", async (e) => {
 
-(function initAdminNotingsYear() {
-  const sel = document.getElementById("adminNotingsYear");
-  if (!sel) return;
-  const now = new Date().getFullYear();
+  const btn = e.target.closest(".confirm-email-btn");
+  if (!btn) return;
 
-  for (let y = now + 2; y >= now - 5; y--) {
-    const o = document.createElement("option");
-    o.value = y;
-    o.textContent = y;
-    sel.appendChild(o);
+  const id = btn.dataset.id;
+
+  if (!confirm("Confirm this email submission? This cannot be undone.")) return;
+
+  try {
+    const res = await fetch("/admin/emails/confirm", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({ id })
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      alert("Confirmed successfully");
+      loadEmailsAdmin();
+    }
+
+  } catch (err) {
+    console.error("Confirm email error:", err);
   }
-})();
+
+});
+
+
+populateAdminYearSelect("adminNotingsYear");
+populateAdminYearSelect("adminEmailsYear");
 
 
