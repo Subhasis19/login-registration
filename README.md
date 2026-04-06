@@ -1,98 +1,106 @@
 # Correspondence Management System
 
-A lightweight correspondence management web app with user authentication, built with Node.js, Express and MySQL. The project provides simple forms for registering users and recording inward/outward correspondence entries.
+A simple web application to manage office correspondence in one place.
 
-This README explains how to set up the application locally, create the required database objects (including the `inward_records` table), and run the app for development.
+This system helps staff:
 
-Contents
-- Overview
-- Features
-- Tech stack
-- Prerequisites
-- Quick start (clone, install, run)
-- Database: schema & DDL (users + inward_records)
-- Configuration (.env)
-- Running the application
-- Project structure
-- API endpoints
-- Development notes & tips
-- Contributing
-- License
+- record incoming letters and documents (`Inward`)
+- record outgoing letters and replies (`Outward`)
+- track pending replies
+- enter monthly notings and email statistics
+- generate Rajbhasha monthly reports
+- manage users and import data in Excel format
 
----
 
-## Overview
 
-The application provides basic login/registration functionality and forms to capture inward and outward correspondence. It was built to be simple to run locally and easy to extend.
+## 1. What This Project Uses
 
-## Features
+| Part | Technology |
+|---|---|
+| Frontend | HTML, CSS, JavaScript |
+| Backend | Node.js, Express.js |
+| Database | MySQL |
+| Authentication | Session-based login |
+| Email OTP | Nodemailer (SMTP email) |
+| Excel Import | XLSX + Multer |
+| PDF Report | Puppeteer |
 
-- User registration and login (passwords hashed using bcrypt)
-- Session-based authentication (express-session)
-- Inward and outward correspondence entry forms with client-side validation
-- Server endpoints to insert and fetch inward records
+## 2. What You Need Before You Start
 
-## Tech stack
+Please make sure you have these things installed:
 
-- Frontend: HTML, CSS, JavaScript
-- Backend: Node.js, Express
-- Database: MySQL (mysql2 driver)
-- Environment: dotenv for configuration
+| Requirement | Why It Is Needed |
+|---|---|
+| Node.js 18 or later | To run the application |
+| MySQL 8.0 or later | To store all system data |
+| A web browser | To open and use the system |
+| An email account with SMTP details | To send OTP for registration and password reset |
 
-## Prerequisites
+Recommended:
 
-- Node.js (v14+)
-- MySQL (v8.0+)
-- Git (to clone the repo)
+- Node.js 20 LTS
+- MySQL Workbench or any MySQL client
 
-## Quick start - Local (development)
+## 3. Important Words Used in This System
 
-1. Clone the repository and enter the folder:
+| Word | Meaning |
+|---|---|
+| Inward | A letter or document received by the office |
+| Outward | A letter or reply sent by the office |
+| Notings | Monthly count of file/document notes |
+| Emails | Monthly count of received or replied emails |
+| Admin | A user with extra permissions like user management, reports, and imports |
 
-```pwsh
-git clone https://github.com/Subhasis19/Correspondence_Management_System.git
+## 4. Quick Setup Overview
+
+You will do these steps:
+
+1. Open the project folder
+2. Install project packages
+3. Create the MySQL database
+4. Create the required tables
+5. Create the `.env` settings file
+6. Start the application
+7. Open the website in your browser
+
+## 5. Step-by-Step Setup Guide
+
+### Step 1: Open the Project Folder
+
+Open PowerShell or Command Prompt inside this folder:
+
+```powershell
 cd Correspondence_Management_System
 ```
 
-2. Install dependencies:
+### Step 2: Install Project Packages
 
-```pwsh
+Run:
+
+```powershell
 npm install
 ```
 
-3. Create a database (example name: `Correspondence_Management_System`) and create a DB user (optional but recommended).
+This downloads everything the system needs to run.
 
-You can create the database from the MySQL client with:
+### Step 3: Create the Database
 
-```sql
-CREATE DATABASE IF NOT EXISTS Correspondence_Management_System;
-USE Correspondence_Management_System;
-```
-
-4. Create a `.env` file at the project root and provide DB connection values (see the Configuration section below).
-
-5. Create the required tables (see Database section).
-
-6. Start the server:
-
-```pwsh
-node server.js
-```
-
-7. Open the app in your browser:
-
-- `http://localhost:3000/frontend/register.html` — Registration page
-- `http://localhost:3000/frontend/index.html` — Login page
-
----
-
-## Database: schema & DDL
-
-The app uses a `users` table for authentication and an `inward_records` table for inward correspondence entries. Below are the DDL statements.
-
-Users table :
+Open MySQL and run:
 
 ```sql
+CREATE DATABASE IF NOT EXISTS correspondence_management_system;
+USE correspondence_management_system;
+```
+
+You can use a different database name if you want, but then you must use the same name in the `.env` file later.
+
+### Step 4: Create the Required Tables
+
+Copy and run the SQL below inside MySQL.
+
+```sql
+USE correspondence_management_system;
+
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100),
@@ -102,20 +110,13 @@ CREATE TABLE IF NOT EXISTS users (
   role ENUM('user', 'admin') DEFAULT 'user',
   group_name VARCHAR(50)
 );
-```
 
-Inward records table (copy / run exactly as shown):
-
-```sql
-CREATE TABLE inward_records (
+CREATE TABLE IF NOT EXISTS inward_records (
   s_no INT AUTO_INCREMENT PRIMARY KEY,
-
   date_of_receipt DATE NOT NULL,
   inward_no VARCHAR(50) NOT NULL UNIQUE,
-
   month VARCHAR(20),
   year INT,
-
   received_in ENUM('Silchar','Guwahati'),
   name_of_sender VARCHAR(100),
   address_of_sender VARCHAR(255),
@@ -124,40 +125,29 @@ CREATE TABLE inward_records (
   sender_pin VARCHAR(6),
   sender_region ENUM('A','B','C'),
   sender_org_type ENUM('Central','State','Private','Individual'),
-
-   type_of_document VARCHAR(100),
+  type_of_document VARCHAR(100),
   language_of_document ENUM('English','Hindi','Bilingual'),
   count INT DEFAULT 1,
-
   remarks ENUM('Action','Information'),
   issued_to VARCHAR(100),
-
   reply_required ENUM('Yes','No'),
   reply_sent_date DATE,
   reply_ref_no VARCHAR(100),
   reply_sent_by ENUM('Speed Post','Email'),
   reply_sent_in ENUM('English','Hindi','Bilingual'),
   reply_count INT DEFAULT 0,
-
-  group_name VARCHAR(50) ,
-
+  group_name VARCHAR(50),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_inward_group ON inward_records(group_name);
 
-```
-Outward Records Table (WITH Foreign Key Link to Inward)
-```sql
-CREATE TABLE outward_records (
+CREATE TABLE IF NOT EXISTS outward_records (
   s_no INT AUTO_INCREMENT PRIMARY KEY,
-
   date_of_despatch DATE NOT NULL,
   outward_no VARCHAR(50) NOT NULL UNIQUE,
-
   month VARCHAR(20),
   year INT,
-
   reply_from ENUM('Silchar','Guwahati'),
   name_of_receiver VARCHAR(100),
   address_of_receiver VARCHAR(255),
@@ -166,28 +156,21 @@ CREATE TABLE outward_records (
   receiver_pin VARCHAR(6),
   receiver_region ENUM('A','B','C'),
   receiver_org_type ENUM('Central','State','Private','Individual'),
-
   type_of_document VARCHAR(100),
   language_of_document ENUM('English','Hindi','Bilingual'),
   count INT DEFAULT 1,
-
   inward_no VARCHAR(100),
   inward_s_no INT,
-
   reply_issued_by VARCHAR(100),
   reply_sent_date DATE,
   reply_ref_no VARCHAR(100),
   reply_sent_by ENUM('Speed Post','Email'),
   reply_sent_in ENUM('English','Hindi','Bilingual'),
   reply_count INT DEFAULT 0,
-
-  group_name VARCHAR(50) ,
-
+  group_name VARCHAR(50),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
   KEY idx_inward_s_no (inward_s_no),
   KEY idx_outward_group (group_name),
-
   CONSTRAINT fk_outward_inward
     FOREIGN KEY (inward_s_no)
     REFERENCES inward_records(s_no)
@@ -195,158 +178,240 @@ CREATE TABLE outward_records (
     ON UPDATE CASCADE
 );
 
-```
-Notings Records
-```sql
-CREATE TABLE notings_records (
+CREATE TABLE IF NOT EXISTS notings_records (
   id INT AUTO_INCREMENT PRIMARY KEY,
-
   month TINYINT NOT NULL,
   year SMALLINT NOT NULL,
-
   entry_type ENUM('Noting','Comment') NOT NULL,
-
   notings_hindi_pages INT UNSIGNED DEFAULT 0,
   notings_english_pages INT UNSIGNED DEFAULT 0,
   eoffice_comments INT UNSIGNED DEFAULT 0,
-
-  group_name VARCHAR(50) ,
-  
+  group_name VARCHAR(50),
   status ENUM('pending', 'confirmed') DEFAULT 'pending',
-
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-  UNIQUE KEY uq_notings_group (
-    group_name, month, year
-  )
+  UNIQUE KEY uq_notings_group (group_name, month, year)
 );
 
 CREATE INDEX idx_notings_group ON notings_records(group_name);
 
-```
-Email Records
-```sql
-CREATE TABLE email_records (
+CREATE TABLE IF NOT EXISTS email_records (
   id INT AUTO_INCREMENT PRIMARY KEY,
-
-  group_name VARCHAR(50) ,
-
+  group_name VARCHAR(50),
   month TINYINT NOT NULL,
   year SMALLINT NOT NULL,
-
   entry_type ENUM('Received','Replied') NOT NULL,
   region ENUM('A','B','C') NOT NULL,
-
   total_english INT UNSIGNED NOT NULL DEFAULT 0,
-  total_hindi   INT UNSIGNED NOT NULL DEFAULT 0,
-
+  total_hindi INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('pending', 'confirmed') DEFAULT 'pending',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
   UNIQUE KEY uq_email_group (group_name, month, year, entry_type, region)
 );
-
 ```
-Recommended verification commands in MySQL client:
+
+### Step 5: Create the `.env` File
+
+In the project root, create a file named `.env`.
+
+Paste this inside it:
+
+```env
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=correspondence_management_system
+
+SESSION_SECRET=change_this_to_a_long_random_secret
+
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_SECURE=false
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_email_app_password
+```
+
+Important:
+
+- `DB_PASSWORD` should be your MySQL password
+- `DB_NAME` must match the database you created
+- `EMAIL_USER` and `EMAIL_PASS` are needed for OTP emails
+- if you use Gmail, use an App Password, not your normal Gmail password
+
+If email settings are missing, these features will not work:
+
+- registration OTP
+- forgot password OTP
+
+### Step 6: Start the Application
+
+Run:
+
+```powershell
+npm start
+```
+
+If everything is correct, you should see a message similar to:
+
+```text
+Server running on http://localhost:3000
+```
+
+### Step 7: Open the System in Your Browser
+
+Open:
+
+[http://localhost:3000](http://localhost:3000)
+
+Useful pages:
+
+| Page | URL |
+|---|---|
+| Login | `http://localhost:3000/` |
+| Register/ New User | `http://localhost:3000/register.html` |
+| Forgot Password | `http://localhost:3000/forgot.html` |
+
+
+## 6. How to Create the First Admin User
+
+By default, new registrations are created as normal users.
+
+If you want someone to use the Admin Panel, do this:
+
+1. Start the application
+2. Register one user from the registration page
+3. Open MySQL and run this query
 
 ```sql
-USE Correspondence_Management_System;
-SHOW TABLES;
-DESCRIBE inward_records;
+UPDATE users
+SET role = 'admin'
+WHERE email = 'your_email@example.com';
 ```
 
-Optional: save the DDL to `inward_records.sql` and import with the MySQL client:
+4. Log out and log in again
 
-```pwsh
-mysql -u <user> -p login_system < inward_records.sql
-```
+After that, the Admin Panel will be visible for that user.
 
----
+## 7. What the Admin Can Do
 
-## Configuration (.env)
+An admin user can:
 
-Create a `.env` file in the project root with the following variables (example):
+- add, edit, and delete users
+- search inward and outward records
+- edit inward and outward entries
+- confirm notings and email submissions
+- import inward and outward data from Excel
+- generate monthly Rajbhasha reports
+- download reports as PDF
 
-```
-DB_HOST=localhost
-DB_USER=appuser
-DB_PASSWORD=strong_password
-DB_NAME=login_system
-```
+## 8. Excel Import Notes
 
-The app reads these values in `db.js` and connects using the `mysql2` driver.
+The system supports Excel import for:
 
----
+- inward records
+- outward records
 
-## Running the application
+Before importing:
 
-Start the server with:
+- upload the file
+- preview the data
+- validate the file
+- then confirm import
 
-```pwsh
-node server.js
-```
+If the file has wrong column names or duplicate values, the system will show the problem before importing.
 
-By default the server listens on `http://localhost:3000` (see `server.js`). Open the frontend pages directly via the paths under `/frontend` or through the Express static server.
-
----
-
-## Project structure (important files)
+## 9. Project structure (important files)And  Project Folders You Should Keep
 
 ```
-Correspondence_Management_System/
-├─ db.js             # Database connection (reads .env)
-├─ server.js         # Express routes and server
-├─ package.json
-├─ README.md
-└─ frontend/
-   ├─ index.html     # Login
-   ├─ register.html  # Registration
-   ├─ inward.html    # Inward form
-   ├─ outward.html   # Outward form
-   ├─ form.css       # Styles for forms
-   ├─ style.css
-   └─ form-validation.js  # Client-side validation (inward/outward)
+project-root/
+│── frontend/                     # Frontend static files
+│   ├── css/                     # Stylesheets
+│   │   ├── admin-style.css
+│   │   ├── form.css
+│   │   ├── report.css
+│   │   └── style.css
+│   │
+│   ├── js/                      # Frontend JavaScript files
+│   │
+│   ├── dashboard.html           # Dashboard page
+│   ├── forgot.html              # Forgot password page
+│   ├── index.html               # Login/Home page
+│   └── register.html            # Registration page
+│
+│── middlewares/                 # Custom middleware
+│   └── authMiddleware.js        # Authentication middleware
+│
+│── routes/                      # API route handlers
+│   ├── admin.js
+│   ├── auth.js
+│   ├── dashboard.js
+│   ├── emails.js
+│   ├── import.js
+│   ├── inward.js
+│   ├── notings.js
+│   └── outward.js
+│
+│── services/                    # Business logic/services
+│   └── report-calculator.js
+│
+│── utils/                       # Utility/helper functions
+│   └── date-range.js
+│
+│── uploads/                     # Uploaded files storage
+│
+│── views/                       # Server-side views
+│   └── forms/
+│       ├── inward.html
+│       └── outward.html
+│
+│── node_modules/                # Dependencies (auto-generated)
+│
+│── .env                         # Environment variables
+│── .env.example                 # Example env file
+│── .gitattributes
+│── .gitignore
+│
+│── admin-setup.js               # Admin initialization script
+│── db.js                        # Database connection setup
+│── server.js                    # Main server entry point
+│
+│── package.json                 # Project metadata & dependencies
+│── package-lock.json
+│── README.md                   # Project documentation
 ```
 
----
+These folders are used by the system and should not be deleted:
 
-## API Endpoints (selected)
+- `frontend`
+- `routes`
+- `views`
+- `uploads/excel/inward`
+- `uploads/excel/outward`
 
-- `POST /register` — Register a new user (form in `frontend/register.html`)
-- `POST /login` — Authenticate a user (form in `frontend/index.html`)
-- `POST /inward/add` — Server route that inserts an inward record (used by `inward.html`)
-- `GET /inward/all` — Returns a JSON list of inward records
+If the upload folders are missing, create them again before using Excel import.
 
-Check `server.js` for the full set of routes and implementation details.
+## 10. Common Problems and Simple Fixes
 
----
-
-## Development notes & recommendations
-
-- The project currently serves the `frontend/` folder as static assets (see `server.js`). Use `http://localhost:3000/frontend/<page>.html` to open pages through the server.
-- The `form-validation.js` file contains client-side validation for both inward and outward forms. If you add other forms, consider extracting shared helpers to a small `form-utils.js` module.
-- For production, use a process manager (PM2) and configure a reverse proxy (NGINX) if exposing the app publicly.
-
-Troubleshooting tips
-- If the server fails to connect to MySQL, verify `.env` values and confirm MySQL is running and accessible from the host.
-- If a form fails to submit, open DevTools → Console and Network to inspect requests and server responses.
-- For duplicate `inward_no` errors the code retries generation, but if you run into insert failures check server logs printed by `server.js`.
-
----
+| Problem | Simple Fix |
+|---|---|
+| App does not start | Make sure Node.js is installed and run `npm install` first |
+| Database connection failed | Check MySQL is running and your `.env` DB values are correct |
+| OTP email is not coming | Check email settings, spam folder, and App Password |
+| Admin Panel is not visible | Make sure the user role is set to `admin`, then log in again |
+| Login works but registration does not | OTP email settings are probably missing or incorrect |
+| PDF is not downloading | Check Puppeteer/Chrome dependencies on your system |
+| Excel import fails | Check column names and required values in the Excel file |
 
 
----
-```
-Upload Excel
-↓
-Preview
-↓
-Dry Run Validation
-↓
-Show error report
-↓
-Admin confirms
-↓
-Transaction Import
-↓
-Final Report
-```
+
+## 11. Final Notes
+
+This project is a local web application built for correspondence and Rajbhasha reporting work.
+
+For smooth use:
+
+- keep MySQL running
+- keep your `.env` file correct
+- keep at least one admin user in the system
+- do not delete the upload folders
+
+
