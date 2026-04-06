@@ -125,4 +125,39 @@ router.get("/dashboard/summary", requireLogin, async (req, res) => {
   }
 });
 
+router.get("/dashboard/replies-pending", requireLogin, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    let params = [];
+    let dateFilterSql = "";
+
+    if (month && year) {
+      const { start, end } = getMonthDateRange(Number(year), Number(month));
+      dateFilterSql = "AND i.date_of_receipt >= ? AND i.date_of_receipt < ?";
+      params = [start, end];
+    }
+
+    const pendingRows = await dbQuery(
+      `
+        SELECT
+          i.*,
+          o.s_no AS has_outward
+        FROM inward_records i
+        LEFT JOIN outward_records o
+          ON i.s_no = o.inward_s_no
+        WHERE i.reply_required = 'Yes'
+          AND o.s_no IS NULL
+          ${dateFilterSql}
+        ORDER BY i.s_no DESC
+      `,
+      params
+    );
+
+    res.json({ inwards: pendingRows });
+  } catch (err) {
+    console.error("Pending replies error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;

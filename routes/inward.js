@@ -101,16 +101,16 @@ router.post("/inward/add", requireLogin, async (req, res) => {
             }
         }
 
-        if (!success) return res.status(500).send("Failed to generate inward number");
+        if (!success) return res.status(500).send("Failed to generate inward number.");
 
-        res.send(`
+        res.status(201).send(`
       <h3 style="text-align:center;">Inward Entry Saved</h3>
       <p style="text-align:center;">Inward No: <strong>${inward_no}</strong></p>
       <p style="text-align:center;"><a href="/inward" target="_self">Add another</a></p>
     `);
     } catch (err) {
         console.error("DB ERROR:", err.sqlMessage || err);
-        res.status(500).send(err.sqlMessage || "Server error");
+        res.status(500).send("Failed to save inward entry.");
     }
 });
 
@@ -119,7 +119,7 @@ router.post("/inward/add", requireLogin, async (req, res) => {
 // =========================
 router.get("/inward/all", requireLogin, (req, res) => {
     db.query("SELECT * FROM inward_records ORDER BY s_no DESC", (err, rows) => {
-        if (err) return res.status(500).send("Error");
+        if (err) return res.status(500).send("Failed to load inward records.");
         res.json(rows);
     });
 });
@@ -133,12 +133,12 @@ router.get("/inward/details/:id", requireLogin, async (req, res) => {
         const rows = await dbQuery("SELECT * FROM inward_records WHERE s_no = ? LIMIT 1", [id]);
 
         if (!rows.length) {
-            return res.status(404).json({ message: "Record not found" });
+            return res.status(404).json({ message: "Inward record not found." });
         }
         res.json(rows[0]);
     } catch (err) {
         console.error("Inward details error:", err);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: "Failed to load inward details." });
     }
 });
 

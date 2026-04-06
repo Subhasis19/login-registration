@@ -290,7 +290,10 @@ router.get("/notings/check", requireLogin, async (req, res) => {
         res.json(buildUserCheckResponse(row, payload));
     } catch (err) {
         console.error("Check status error:", err);
-        res.json({ exists: false });
+        res.status(500).json({
+            exists: false,
+            message: "Failed to check noting status.",
+        });
     }
 });
 

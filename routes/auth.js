@@ -96,7 +96,7 @@ function sendOtpEmail(email, otp, subject = "Your OTP") {
 
 async function sendOtpResponse(req, res, { email, purpose, subject }) {
   if (!email) {
-    return res.status(400).json({ success: false, message: "Email required" });
+    return res.status(400).json({ success: false, message: "Email is required." });
   }
 
   const otp = createOtp();
@@ -107,7 +107,7 @@ async function sendOtpResponse(req, res, { email, purpose, subject }) {
     res.json({ success: true });
   } catch (err) {
     console.error("OTP mail error:", err);
-    res.status(500).json({ success: false, message: "Mail error" });
+    res.status(500).json({ success: false, message: "Failed to send OTP email." });
   }
 }
 
@@ -141,7 +141,7 @@ router.post("/verify-otp", (req, res) => {
   const result = verifyOtpChallenge(req, OTP_PURPOSES.REGISTRATION, email, otp);
 
   if (!result.verified) {
-    return res.status(400).send(result);
+    return res.status(400).json(result);
   }
 
   req.session.otpVerified = true;
@@ -154,7 +154,7 @@ router.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
-    return res.status(400).json({ success: false, message: "Email required" });
+    return res.status(400).json({ success: false, message: "Email is required." });
   }
 
   try {
@@ -171,7 +171,7 @@ router.post("/forgot-password", async (req, res) => {
     });
   } catch (err) {
     console.error("Forgot password OTP error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ success: false, message: "Failed to send password reset OTP." });
   }
 });
 
@@ -228,32 +228,38 @@ router.post("/register", (req, res) => {
   const { name, email, mobile, password, confirmPassword, group_name } = req.body;
 
   if (!req.session.otpVerified || req.session.verifiedEmail !== email) {
-    return res.send('Verify OTP first <a href="register.html">Try again</a>');
+    return res.status(400).send('Verify OTP first <a href="register.html">Try again</a>');
   }
 
   if (password !== confirmPassword) {
-    return res.send('Passwords do not match <a href="register.html">Try again</a>');
+    return res.status(400).send('Passwords do not match <a href="register.html">Try again</a>');
   }
 
   const passwordError = getPasswordValidationMessage(password);
   if (passwordError) {
-    return res.send(`${passwordError} <a href="register.html">Try again</a>`);
+    return res.status(400).send(`${passwordError} <a href="register.html">Try again</a>`);
   }
 
   bcrypt.hash(password, 10, (err, hash) => {
-    if (err) return res.status(500).send("Error hashing password");
+    if (err) return res.status(500).send("Failed to secure the password.");
 
     db.query(
       "INSERT INTO users (name, email, mobile, password, role, group_name) VALUES (?, ?, ?, ?, ?, ?)",
       [name, email, mobile, hash, "user", group_name],
       (err) => {
-        if (err) return res.send("Error: " + err.message);
+        if (err) {
+          if (err.code === "ER_DUP_ENTRY") {
+            return res.status(409).send('An account with this email already exists <a href="register.html">Try again</a>');
+          }
+
+          return res.status(500).send("Failed to complete registration.");
+        }
 
         req.session.otpVerified = false;
         delete req.session.verifiedEmail;
         clearOtpChallenge(req);
 
-        res.send('Registration complete <a href="/">Login</a>');
+        res.status(201).send('Registration complete <a href="/">Login</a>');
       }
     );
   });
@@ -262,15 +268,19 @@ router.post("/register", (req, res) => {
 router.post("/login", (req, res) => {
   const { email, password } = req.body;
 
+  if (!email || !password) {
+    return res.status(400).send("Email and password are required.");
+  }
+
   db.query("SELECT * FROM users WHERE email = ?", [email], (err, rows) => {
-    if (err) return res.status(500).send("Error querying database");
-    if (rows.length === 0) return res.send("User not found");
+    if (err) return res.status(500).send("Failed to query users.");
+    if (rows.length === 0) return res.status(404).send("User not found");
 
     const user = rows[0];
 
     bcrypt.compare(password, user.password, (err, match) => {
-      if (err) return res.status(500).send("Error comparing passwords");
-      if (!match) return res.send("Invalid password");
+      if (err) return res.status(500).send("Failed to verify password.");
+      if (!match) return res.status(401).send("Invalid password");
 
       req.session.user = {
         id: user.id,
